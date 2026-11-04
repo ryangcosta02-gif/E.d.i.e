@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>e.d.i.e</title>
-  <meta name="theme-color" content="#0f1117" />
+  <meta name="theme-color" content="#050505" />
   <link rel="manifest" href="manifest.json" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%237c5cff'/><text x='32' y='42' font-size='28' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>e</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%23ff7a1a'/><text x='32' y='42' font-size='28' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>e</text></svg>" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -22,13 +22,14 @@
       </div>
       <nav class="nav">
         <button class="nav-item active" data-view="hoje"><span class="ico">◎</span>Hoje</button>
+        <button class="nav-item talk" data-view="conversa"><span class="ico">◉</span>Fale com a Edie</button>
         <button class="nav-item" data-view="agenda"><span class="ico">▦</span>Agenda</button>
         <button class="nav-item" data-view="tarefas"><span class="ico">✓</span>Tarefas</button>
         <button class="nav-item" data-view="instagram"><span class="ico">◈</span>Instagram</button>
         <button class="nav-item" data-view="config"><span class="ico">⚙</span>Configurações</button>
       </nav>
       <div class="sidebar-foot">
-        <div class="kbd-hint">Atalho: <kbd>/</kbd> fala com a Edie</div>
+        <div class="kbd-hint"><kbd>/</kbd> escrever para a Edie<br><kbd>Ctrl</kbd>+<kbd>Espaço</kbd> falar com a Edie</div>
       </div>
     </aside>
 
@@ -38,7 +39,8 @@
         <button class="menu-btn" id="menuBtn" aria-label="Menu">☰</button>
         <form class="command" id="commandForm" autocomplete="off">
           <span class="command-ico">✦</span>
-          <input id="commandInput" placeholder='Fale com a Edie… ex: "tarefa ligar pro contador amanhã" ou "evento reunião sexta 15h"' />
+          <input id="commandInput" placeholder='Fale com a Edie… ex: "o que eu tenho hoje?" ou "tarefa ligar pro contador amanhã"' />
+          <button type="button" class="mic" id="topMic" aria-label="Falar com a Edie" title="Falar com a Edie">🎙</button>
         </form>
         <div class="today-chip" id="todayChip"></div>
       </header>
@@ -47,12 +49,15 @@
       <!-- HOJE -->
       <section class="view active" id="view-hoje">
         <div class="hero">
-          <h1 id="greeting">Olá</h1>
-          <p id="summaryLine" class="muted"></p>
+          <div>
+            <h1 id="greeting">Olá</h1>
+            <p id="summaryLine" class="muted"></p>
+          </div>
+          <button class="btn primary" id="hearDay">🔊 Edie, me fala do meu dia</button>
         </div>
         <div class="grid grid-3">
-          <div class="card stat"><div class="stat-label">Compromissos hoje</div><div class="stat-value" id="statEventos">0</div></div>
-          <div class="card stat"><div class="stat-label">Tarefas pendentes</div><div class="stat-value" id="statTarefas">0</div></div>
+          <div class="card stat o"><div class="stat-label">Compromissos hoje</div><div class="stat-value" id="statEventos">0</div></div>
+          <div class="card stat b"><div class="stat-label">Tarefas pendentes</div><div class="stat-value" id="statTarefas">0</div></div>
           <div class="card stat"><div class="stat-label">Seguidores no Instagram</div><div class="stat-value" id="statSeguidores">—</div><div class="stat-delta" id="statSeguidoresDelta"></div></div>
         </div>
         <div class="grid grid-2">
@@ -68,6 +73,30 @@
         <div class="card">
           <div class="card-head"><h2>Instagram — últimos 7 dias</h2><button class="link" data-goto="instagram">Métricas completas →</button></div>
           <div class="grid grid-4" id="hojeInsta"></div>
+        </div>
+      </section>
+
+      <!-- CONVERSA -->
+      <section class="view" id="view-conversa">
+        <div class="talk-layout">
+          <div class="card orb-card">
+            <button class="orb" id="orb" aria-label="Toque para falar"><span class="orb-ico" id="orbIco">🎙</span></button>
+            <div class="orb-status" id="orbStatus">Toque para falar</div>
+            <div class="orb-sub" id="orbSub"></div>
+            <div class="toggles">
+              <label class="toggle">Edie responde com voz<input type="checkbox" id="optVoice" checked /><span class="sw"></span></label>
+              <label class="toggle">Conversa contínua (mãos livres)<input type="checkbox" id="optHands" /><span class="sw"></span></label>
+            </div>
+            <div class="brain" id="brainInfo"></div>
+          </div>
+          <div class="card chat-card">
+            <div class="chat" id="chat"></div>
+            <form class="chat-input" id="chatForm" autocomplete="off">
+              <input id="chatInput" placeholder="Escreva ou toque no microfone…" />
+              <button type="button" class="mic" id="chatMic" aria-label="Falar">🎙</button>
+              <button class="btn primary">Enviar</button>
+            </form>
+          </div>
         </div>
       </section>
 
@@ -167,6 +196,30 @@
             <label>Como a Edie deve te chamar?<input id="cfgName" placeholder="Seu nome" /></label>
             <button class="btn primary">Salvar</button>
           </form>
+          <form class="card form" id="aiForm">
+            <h2>Inteligência da Edie <span class="badge off" id="aiBadge">básica</span></h2>
+            <p class="muted small">Sem chave, a Edie entende comandos do dia a dia (agenda, tarefas, Instagram). Com uma chave da API do Claude ela conversa sobre qualquer assunto, entende o que você fala do seu jeito e age por você.
+              Crie a chave em <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com</a>.</p>
+            <label>Chave da API do Claude<input id="cfgAiKey" type="password" placeholder="sk-ant-…" /></label>
+            <p class="muted small">⚠ A chave fica salva só neste navegador. Não use este app em computador compartilhado com a chave salva.</p>
+            <div class="row">
+              <button class="btn primary">Salvar</button>
+              <button class="btn ghost" type="button" id="aiClear">Remover chave</button>
+            </div>
+          </form>
+          <form class="card form" id="voiceForm">
+            <h2>Voz da Edie</h2>
+            <label>Voz<select id="cfgVoice"></select></label>
+            <div class="row">
+              <label>Velocidade<input type="range" id="cfgRate" min="0.7" max="1.5" step="0.05" /></label>
+              <label>Tom<input type="range" id="cfgPitch" min="0.6" max="1.6" step="0.05" /></label>
+            </div>
+            <p class="muted small">As vozes vêm do seu sistema. No Chrome/Edge as vozes "Google português do Brasil" e "Microsoft Francisca/Thalita (Natural)" são as mais naturais.</p>
+            <div class="row">
+              <button class="btn primary">Salvar</button>
+              <button class="btn ghost" type="button" id="voiceTest">▶ Testar voz</button>
+            </div>
+          </form>
           <form class="card form" id="igForm">
             <h2>Conectar Instagram</h2>
             <p class="muted small">Precisa ser conta Profissional (Criador ou Empresa). Gere um token de acesso no
@@ -225,6 +278,7 @@
     </form>
   </dialog>
 
-  <script src="app.js"></script>
+  <script src="vendor/anthropic-sdk.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

@@ -36,6 +36,9 @@
     tasks: [],
     ig: { token: '', cache: null, followerHistory: {} },
     gcal: { id: '', key: '' },
+    ai: { key: '' },
+    voice: { name: '', rate: 1.05, pitch: 1, on: true, handsFree: false },
+    chat: [],
   });
   let state;
   try { state = Object.assign(defaults(), JSON.parse(localStorage.getItem(KEY) || '{}')); }
@@ -478,11 +481,70 @@
     const xy = points.map((p, i) => [PL + step * i + step / 2, H - PB - ((H - PB - PT) * (p.y - min)) / (max - min)]);
     const d = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
     const area = `${d}L${xy[xy.length - 1][0]},${H - PB}L${xy[0][0]},${H - PB}Z`;
-    const dots = xy.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="3" fill="var(--accent-2)"><title>${fmtDate(points[i].x)}: ${fmtNum(points[i].y)}</title></circle>`).join('');
+    const dots = xy.map(([x, y], i) => `<circle cx="${x}" cy="${y}" r="3" class="dot"><title>${fmtDate(points[i].x)}: ${fmtNum(points[i].y)}</title></circle>`).join('');
     return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${axes(min, max, points, step)}<path class="area" d="${area}"/><path class="line" d="${d}"/>${dots}</svg>`;
   }
 
-  // ---------- Barra de comando (linguagem natural simples) ----------
+  // ---------- Ações compartilhadas (usadas pela barra, pela voz e pela IA) ----------
+  const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : s;
+  const tomorrow = () => ymd(addDays(new Date(), 1));
+  const spokenDate = (s) => s === today() ? 'hoje' : s === tomorrow() ? 'amanhã' : fmtDate(s, { weekday: 'long', day: 'numeric', month: 'long' });
+  const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+
+  function createEvent({ title, date, start = '', end = '', place = '', notes = '' }) {
+    if (start && !end) end = `${pad(Math.min(23, +start.slice(0, 2) + 1))}:${start.slice(3)}`;
+    const ev = { id: uid(), title: cap(title), date: date || today(), start, end, place, notes };
+    state.events.push(ev); save(); render();
+    return ev;
+  }
+  function findTask(query) {
+    const words = norm(query).split(/\W+/).filter((w) => w.length > 2);
+    let best = null, score = 0;
+    for (const t of pendingTasks()) {
+      const tn = norm(t.title);
+      const s = words.filter((w) => tn.includes(w)).length;
+      if (s > score) { best = t; score = s; }
+    }
+    return best;
+  }
+  function completeTask(t) { t.done = true; t.doneAt = Date.now(); save(); render(); }
+
+  function dayText(date) {
+    const evs = eventsOn(date);
+    const isToday = date === today();
+    const quando = spokenDate(date);
+    let txt = evs.length
+      ? `${cap(quando)} você tem ${plural(evs.length, 'compromisso', 'compromissos')}: ` +
+        evs.map((e) => (e.start ? `às ${e.start}, ` : 'o dia todo, ') + e.title).join('; ') + '.'
+      : `${cap(quando)} sua agenda está livre.`;
+    const tks = isToday ? tasksForToday() : state.tasks.filter((t) => !t.done && t.date === date);
+    if (tks.length) txt += ` E ${tks.length === 1 ? 'falta uma tarefa' : `faltam ${tks.length} tarefas`}: ${tks.slice(0, 5).map((t) => t.title).join(', ')}${tks.length > 5 ? ' e outras' : ''}.`;
+    else if (isToday) txt += ' Nenhuma tarefa pendente pra hoje.';
+    return txt;
+  }
+  function tasksText() {
+    const tks = tasksForToday();
+    const late = tks.filter((x) => x.date && x.date < today());
+    if (!tks.length) return 'Você não tem nada pendente pra hoje. Tudo em dia!';
+    return `${tks.length === 1 ? 'Falta uma tarefa' : `Faltam ${tks.length} tarefas`}: ${tks.slice(0, 6).map((t) => t.title + (t.prio === 3 ? ' (urgente)' : '')).join(', ')}.` +
+      (late.length ? ` ${plural(late.length, 'delas está atrasada', 'delas estão atrasadas')}.` : '');
+  }
+  function igText() {
+    const ig = igData();
+    if (!ig) return 'Ainda estou carregando os dados do seu Instagram.';
+    const k = kpis(ig, 7);
+    const d = deltaFollowers(ig.days, 7);
+    const val = (i) => k[i].value == null ? 'sem dado' : k[i].fmt ? k[i].fmt(k[i].value) : fmtNum(k[i].value);
+    return `${ig.demo ? 'Com os dados de exemplo: ' : ''}você está com ${fmtNum(ig.profile.followers_count)} seguidores` +
+      (d != null ? `, ${d >= 0 ? 'ganhou' : 'perdeu'} ${fmtNum(Math.abs(d))} nos últimos 7 dias` : '') +
+      `. Na semana, o alcance foi de ${val(0)}, com ${val(2)} interações e taxa de engajamento de ${val(3)}.`;
+  }
+  function briefing() {
+    const ig = igData();
+    return `${greeting()}! ${dayText(today())}` + (ig && !ig.demo ? ` No Instagram, ${fmtNum(ig.profile.followers_count)} seguidores.` : '');
+  }
+
+  // ---------- Cérebro local (sem IA): entende comandos do dia a dia ----------
   function parseDate(text) {
     const t = norm(text);
     const base = new Date();
@@ -513,47 +575,450 @@
     const h = +m[1]; if (h > 23) return null;
     return { time: `${pad(h)}:${m[2] || '00'}`, re: m[0] };
   }
-  const clean = (s) => s.replace(/\s{2,}/g, ' ').replace(/^[\s,:-]+|[\s,:-]+$/g, '');
+  const clean = (s) => s.replace(/\s{2,}/g, ' ').replace(/^[\s,:.!?-]+|[\s,:.!?-]+$/g, '');
 
-  function runCommand(raw) {
-    let text = raw.trim(); if (!text) return;
-    const n = norm(text);
-    const navMap = { agenda: 'agenda', calendario: 'agenda', instagram: 'instagram', insta: 'instagram', metricas: 'instagram', tarefas: 'tarefas', hoje: 'hoje', inicio: 'hoje', configuracoes: 'config', config: 'config' };
-    const navWord = n.replace(/^(abrir|abre|ver|mostrar|mostra|ir para|ir pra)\s+/, '');
-    if (navMap[navWord]) { go(navMap[navWord]); return; }
-    if (/^(o que (eu )?tenho|como (esta|ta) (meu|o) dia|resumo)/.test(n)) { go('hoje'); toast($('#summaryLine').textContent); return; }
+  const VIEWS = { agenda: 'agenda', calendario: 'agenda', instagram: 'instagram', insta: 'instagram', metricas: 'instagram', tarefas: 'tarefas', hoje: 'hoje', inicio: 'hoje', configuracoes: 'config', config: 'config', conversa: 'conversa' };
+  const VIEW_NAMES = { hoje: 'a tela de hoje', agenda: 'sua agenda', tarefas: 'suas tarefas', instagram: 'seu Instagram', config: 'as configurações', conversa: 'a conversa' };
 
-    const isEvent = /^(evento|compromisso|reuniao|marcar|marca|agendar|agenda)\b/.test(n);
-    const isTask = /^(tarefa|lembrar de|lembrar|lembre-me de|preciso|fazer|todo)\b/.test(n);
-    text = text.replace(/^(evento|compromisso|marcar|marca|agendar|tarefa|lembre-me de|lembrar de|lembrar|preciso|fazer|todo)\s*:?\s*/i, '');
+  function localBrain(raw) {
+    let text = raw.trim().replace(/^(edie|edi|ed)[,!.]?\s+/i, '');
+    const n = norm(text).replace(/[?!.]+$/, '');
+    if (!n) return 'Oi! Tô aqui.';
+
+    // Navegação
+    const nav = n.match(/^(?:abrir|abre|abra|ver|mostrar|mostra|mostre|ir para|ir pra|vai para|vai pra)\s+(?:a |o |as |os |meu |minha |minhas |meus )?(\w+)$/) || (VIEWS[n] && [n, n]);
+    if (nav && VIEWS[nav[1]]) { go(VIEWS[nav[1]]); return `Abrindo ${VIEW_NAMES[VIEWS[nav[1]]]}.`; }
+
+    // Conversa social
+    if (/^(obrigad[oa]|valeu|brigad[oa])/.test(n)) return 'Por nada! Tô sempre por aqui.';
+    if (/^(oi|ola|opa|e ai|eai|hey|bom dia|boa tarde|boa noite)\b/.test(n) && n.split(' ').length <= 4) return briefing();
+    if (/^(quem e voce|o que voce (faz|sabe fazer)|ajuda|como (te usar|funciona))/.test(n))
+      return 'Eu sou a Edie, sua assistente. Posso te contar como está seu dia, criar tarefas e compromissos, marcar tarefas como feitas e te passar as métricas do Instagram. É só falar, por exemplo: "o que eu tenho amanhã?" ou "reunião sexta às 15h".';
+
+    // Concluir tarefa
+    const done = n.match(/^(?:concluir|conclui|concluí|marcar como feit[ao]|marca como feit[ao]|terminei|finalizei|ja fiz|fiz|feito)\s*:?\s+(?:a tarefa\s+)?(.+)$/);
+    if (done) {
+      const t = findTask(done[1]);
+      if (!t) return `Não achei nenhuma tarefa pendente parecida com "${done[1]}".`;
+      completeTask(t);
+      const rest = tasksForToday().length;
+      return `Pronto, marquei "${t.title}" como feita. ${rest ? `Ainda ${rest === 1 ? 'falta uma' : `faltam ${rest}`} pra hoje.` : 'Você zerou as tarefas de hoje!'}`;
+    }
+
+    const createVerb = /^(evento|compromisso|reuniao|marcar|marca|marque|agendar|agende|agenda|tarefa|lembrar|lembre|lembra|preciso|anota|anote|adicionar|adiciona|adicione|criar|cria|crie|fazer|todo)\b/.test(n);
+    const question = /\?$/.test(text) || /^(o que|oque|que|qual|quais|quando|quantos|quantas|como|tenho|me (fala|diz|conta)|fala|diz|resumo|e (hoje|amanha))/.test(n);
+
+    // Perguntas
+    if (!createVerb || question) {
+      if (/(instagram|insta\b|seguidor|alcance|engajamento|curtida|metrica)/.test(n)) return igText();
+      if (/(tarefa|pendente|falta|fazer|afazer)/.test(n) && !/(agenda|compromisso|reuni)/.test(n)) return tasksText();
+      if (/(meu dia|resumo|agenda|compromisso|reuni|proximo|tenho|marcado|livre|ocupad|hoje|amanha|semana)/.test(n) || parseDate(text)) {
+        if (/proxim[oa] (compromisso|reuniao|evento)/.test(n)) {
+          const now = nowHM();
+          const next = state.events.filter((e) => e.date > today() || (e.date === today() && (e.start || '99') >= now))
+            .sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')))[0];
+          return next ? `Seu próximo compromisso é ${next.title}, ${spokenDate(next.date)}${next.start ? ' às ' + next.start : ''}.` : 'Você não tem nenhum compromisso pela frente.';
+        }
+        const d = parseDate(text);
+        return dayText(d?.date || today());
+      }
+    }
+
+    // Criação
+    const isEvent = /^(evento|compromisso|reuniao|marcar|marca|marque|agendar|agende|agenda)\b/.test(n);
+    const isTask = /^(tarefa|lembrar|lembre|lembra|preciso|anota|anote|adicionar|adiciona|adicione|fazer|todo)\b/.test(n);
+    text = text.replace(/^(adicion[ae]r?|cri[ae]r?|anot[ae]r?)\s+(uma\s+|um\s+)?/i, '')
+      .replace(/^(evento|compromisso|marcar|marca|marque|agendar|agende|tarefa|lembre-me de|lembre-me|lembrar de|lembrar|lembra de|lembra|preciso|fazer|todo)\s*:?\s*/i, '')
+      .replace(/^(uma?\s+)?(tarefa|compromisso|evento)\s*(de|para|pra)?\s*/i, '')
+      .replace(/^(de|que|para|pra)\s+/i, '');
 
     const d = parseDate(text); if (d) text = text.replace(d.re, ' ');
     const tm = parseTime(text);
 
     if (isEvent || (tm && !isTask)) {
       if (tm) text = text.replace(tm.re, ' ');
-      const title = clean(text) || 'Compromisso';
-      const date = d?.date || today();
-      const ev = { id: uid(), title: title[0].toUpperCase() + title.slice(1), date, start: tm?.time || '', end: tm ? `${pad(Math.min(23, +tm.time.slice(0, 2) + 1))}:${tm.time.slice(3)}` : '', place: '', notes: '' };
-      state.events.push(ev); save(); render();
-      toast(`📅 "${ev.title}" — ${fmtDate(date)}${ev.start ? ' às ' + ev.start : ''}`);
-      return;
+      const ev = createEvent({ title: clean(text) || 'Compromisso', date: d?.date || today(), start: tm?.time || '' });
+      return `Marquei "${ev.title}" para ${spokenDate(ev.date)}${ev.start ? ' às ' + ev.start : ''}.`;
     }
-    let prio = 2;
-    if (/\b(urgente|importante)\b/i.test(text)) { prio = 3; text = text.replace(/\b(urgente|importante)\b/gi, ' '); }
-    const title = clean(text);
-    if (!title) return;
-    addTask({ title: title[0].toUpperCase() + title.slice(1), date: d?.date || today(), prio });
-    toast(`✓ Tarefa adicionada${d ? ' para ' + fmtDate(d.date) : ' para hoje'}`);
+    if (isTask) {
+      let prio = 2;
+      if (/\b(urgente|importante)\b/i.test(text)) { prio = 3; text = text.replace(/\b(urgente|importante)\b/gi, ' '); }
+      const title = clean(text);
+      if (!title) return 'Qual tarefa você quer que eu anote?';
+      addTask({ title: cap(title), date: d?.date || today(), prio });
+      return `Anotado: "${cap(title)}" para ${spokenDate(d?.date || today())}${prio === 3 ? ', como urgente' : ''}.`;
+    }
+    return state.ai.key
+      ? 'Não consegui entender. Pode repetir de outro jeito?'
+      : 'Isso eu ainda não sei responder no modo básico. Posso falar do seu dia, das tarefas, da agenda e do Instagram, ou anotar coisas pra você. Pra conversar sobre qualquer assunto, coloque a chave do Claude em Configurações.';
   }
+
+  // ---------- Voz: fala (síntese) ----------
+  const synth = window.speechSynthesis;
+  let ptVoices = [];
+  let speakingCount = 0;
+  let afterSpeak = null;
+  function loadVoices() {
+    if (!synth) return;
+    ptVoices = synth.getVoices().filter((v) => /^pt/i.test(v.lang))
+      .sort((a, b) => (b.lang === 'pt-BR') - (a.lang === 'pt-BR') || /natural|google/i.test(b.name) - /natural|google/i.test(a.name));
+    const sel = $('#cfgVoice');
+    sel.innerHTML = ptVoices.length
+      ? ptVoices.map((v) => `<option value="${esc(v.name)}">${esc(v.name)} (${v.lang})</option>`).join('')
+      : '<option value="">Voz padrão do sistema</option>';
+    if (state.voice.name && ptVoices.some((v) => v.name === state.voice.name)) sel.value = state.voice.name;
+  }
+  if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
+  const pickVoice = () => ptVoices.find((v) => v.name === state.voice.name) || ptVoices[0] || null;
+  const forSpeech = (s) => s
+    .replace(/[*_#`>]+/g, '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
+    .replace(/(\d{1,2}):00\b/g, '$1 horas')
+    .replace(/(\d{1,2}):(\d{2})\b/g, '$1 e $2')
+    .replace(/@/g, ' arroba ')
+    .trim();
+
+  function speak(text, force = false) {
+    if (!synth || (!force && !$('#optVoice').checked)) return;
+    const t = forSpeech(text);
+    if (!t) return;
+    const u = new SpeechSynthesisUtterance(t);
+    u.lang = 'pt-BR';
+    const v = pickVoice(); if (v) u.voice = v;
+    u.rate = state.voice.rate; u.pitch = state.voice.pitch;
+    speakingCount++;
+    setOrb('speaking');
+    const end = () => {
+      speakingCount = Math.max(0, speakingCount - 1);
+      if (!speakingCount && !thinking) { setOrb('idle'); const f = afterSpeak; afterSpeak = null; f && f(); }
+    };
+    u.onend = end; u.onerror = end;
+    synth.speak(u);
+  }
+  function stopSpeaking() { if (synth) { afterSpeak = null; synth.cancel(); speakingCount = 0; } }
+  // Quando terminar de falar: no modo mãos-livres, volta a ouvir
+  function whenDoneSpeaking(fn) {
+    if (!speakingCount) fn(); else afterSpeak = fn;
+  }
+
+  // ---------- Voz: escuta (reconhecimento) ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, listening = false, thinking = false;
+  function setOrb(mode, sub) {
+    const orb = $('#orb');
+    orb.classList.toggle('listening', mode === 'listening');
+    orb.classList.toggle('speaking', mode === 'speaking');
+    orb.classList.toggle('thinking', mode === 'thinking');
+    $('#orbIco').textContent = { listening: '●', speaking: '◉', thinking: '…', idle: '🎙' }[mode] || '🎙';
+    $('#orbStatus').textContent = { listening: 'Ouvindo…', speaking: 'Edie falando — toque para interromper', thinking: 'Pensando…', idle: 'Toque para falar' }[mode];
+    if (sub !== undefined) $('#orbSub').textContent = sub;
+    $$('.mic').forEach((m) => m.classList.toggle('listening', mode === 'listening'));
+  }
+  function listen(fromBar = false) {
+    if (!SR) { toast('Seu navegador não reconhece voz. Use Chrome, Edge ou Safari.'); return; }
+    if (listening) { rec.stop(); return; }
+    stopSpeaking();
+    rec = new SR();
+    rec.lang = 'pt-BR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    let finalText = '';
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+        else interim += e.results[i][0].transcript;
+      }
+      const shown = (finalText + interim).trim();
+      $('#orbSub').textContent = shown ? `"${shown}"` : '';
+      if (fromBar) $('#commandInput').value = shown;
+    };
+    rec.onerror = (e) => {
+      const msg = { 'not-allowed': 'Permita o uso do microfone para falar com a Edie.', 'no-speech': 'Não ouvi nada. Toque e fale de novo.', network: 'O reconhecimento de voz precisa de internet.', 'audio-capture': 'Nenhum microfone encontrado.' }[e.error];
+      if (msg) toast(msg);
+    };
+    rec.onend = () => {
+      listening = false;
+      setOrb('idle', '');
+      if (fromBar) $('#commandInput').value = '';
+      if (finalText.trim()) ask(finalText.trim(), { fromBar });
+    };
+    listening = true;
+    setOrb('listening', '');
+    try { rec.start(); } catch { listening = false; setOrb('idle'); }
+  }
+
+  // ---------- Conversa ----------
+  const MAX_CHAT = 120;
+  function renderChat() {
+    const box = $('#chat');
+    if (!state.chat.length) {
+      box.innerHTML = `<div class="chat-empty">
+        <h2 class="accent" style="font-size:1.4rem">${esc(greeting())}!</h2>
+        <p>Pode falar comigo ou escrever. Eu te respondo com voz.</p>
+        <div class="chips">${['O que eu tenho hoje?', 'O que falta fazer?', 'Como está meu Instagram?', 'Reunião amanhã às 10h', 'Lembrar de pagar o aluguel sexta']
+          .map((c) => `<button class="chip" data-say="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>`;
+    } else {
+      box.innerHTML = state.chat.map((m) => `<div class="msg ${m.role}">${esc(m.text)}</div>`).join('');
+    }
+    box.scrollTop = box.scrollHeight;
+    $('#brainInfo').innerHTML = state.ai.key ? 'Inteligência: <b>Claude</b> (conversa livre)' : 'Inteligência: <b>básica</b> · <button class="link" data-goto="config">ativar conversa livre</button>';
+    if (!SR) $('#orbSub').textContent = 'Reconhecimento de voz indisponível neste navegador — escreva abaixo.';
+  }
+  function addMsg(role, text) {
+    if (state.chat.length === 0 && currentView === 'conversa') $('#chat').innerHTML = '';
+    const m = { role, text };
+    state.chat.push(m);
+    if (state.chat.length > MAX_CHAT) state.chat.splice(0, state.chat.length - MAX_CHAT);
+    save();
+    const el = document.createElement('div');
+    el.className = 'msg ' + role; el.textContent = text;
+    $('#chat').appendChild(el);
+    $('#chat').scrollTop = $('#chat').scrollHeight;
+    return { m, el, set(t) { m.text = t; el.textContent = t; $('#chat').scrollTop = $('#chat').scrollHeight; } };
+  }
+  document.addEventListener('click', (e) => { const c = e.target.closest('[data-say]'); if (c) ask(c.dataset.say); });
+
+  async function ask(text, { fromBar = false } = {}) {
+    text = text.trim(); if (!text) return;
+    stopSpeaking();
+    addMsg('me', text);
+    let reply = '';
+    if (state.ai.key && window.Anthropic) {
+      thinking = true; setOrb('thinking');
+      try { reply = await claudeBrain(text); }
+      catch (err) { reply = aiErrorText(err); addMsg('edie', reply); speak(reply); }
+      finally { thinking = false; if (!speakingCount) setOrb('idle'); }
+    } else {
+      reply = localBrain(text);
+      addMsg('edie', reply);
+      speak(reply);
+    }
+    if (fromBar && currentView !== 'conversa') toast(reply.length > 140 ? reply.slice(0, 137) + '…' : reply);
+    if ($('#optHands').checked && SR && currentView === 'conversa') whenDoneSpeaking(() => setTimeout(() => listen(), 300));
+  }
+
+  // ---------- Cérebro com IA (Claude) ----------
+  const MODEL = 'claude-opus-5-5';
+  const SYSTEM = `Você é a Edie (e.d.i.e), assistente pessoal por voz. Você ajuda o usuário a organizar o dia: agenda, tarefas e métricas do Instagram, e também conversa sobre qualquer assunto.
+
+Suas respostas são lidas em voz alta. Então:
+- Fale em português do Brasil, com tom próximo, caloroso e direto, como uma assistente de confiança.
+- Seja breve: em geral de uma a três frases. Só se estenda se o usuário pedir detalhes.
+- Escreva texto corrido, sem markdown, sem listas com marcadores, sem emojis e sem links.
+- Horários no formato 15h ou 15h30.
+
+Cada mensagem do usuário vem com um bloco <contexto> contendo data, hora e os dados atuais (compromissos, tarefas pendentes e Instagram). Use esses dados como verdade e não invente compromissos, tarefas ou números.
+Quando o usuário pedir para anotar, marcar, lembrar, concluir ou abrir algo, use as ferramentas e depois confirme em uma frase o que fez. Se faltar uma informação essencial (por exemplo o dia de um compromisso), pergunte antes.`;
+
+  const TOOLS = [
+    { name: 'criar_tarefa', description: 'Cria uma tarefa na lista do usuário.', eager_input_streaming: true,
+      input_schema: { type: 'object', properties: {
+        titulo: { type: 'string', description: 'Título curto da tarefa' },
+        data: { type: 'string', description: 'Data no formato AAAA-MM-DD. Padrão: hoje.' },
+        prioridade: { type: 'string', enum: ['baixa', 'media', 'alta'] },
+        categoria: { type: 'string', description: 'Ex: Instagram, Pessoal, Trabalho' } }, required: ['titulo'] } },
+    { name: 'criar_compromisso', description: 'Cria um compromisso na agenda do usuário.', eager_input_streaming: true,
+      input_schema: { type: 'object', properties: {
+        titulo: { type: 'string' },
+        data: { type: 'string', description: 'AAAA-MM-DD' },
+        inicio: { type: 'string', description: 'HH:MM (24h). Omitir se for o dia todo.' },
+        fim: { type: 'string', description: 'HH:MM (24h)' },
+        local: { type: 'string' } }, required: ['titulo', 'data'] } },
+    { name: 'concluir_tarefa', description: 'Marca uma tarefa pendente como feita, pelo id que aparece no contexto.', eager_input_streaming: true,
+      input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
+    { name: 'excluir_compromisso', description: 'Remove um compromisso da agenda, pelo id que aparece no contexto.', eager_input_streaming: true,
+      input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
+    { name: 'abrir_tela', description: 'Abre uma tela do app para o usuário ver.', eager_input_streaming: true,
+      input_schema: { type: 'object', properties: { tela: { type: 'string', enum: ['hoje', 'agenda', 'tarefas', 'instagram', 'config', 'conversa'] } }, required: ['tela'] } },
+  ];
+
+  const isStr = (v) => typeof v === 'string' && v.trim() !== '';
+  const isDate = (v) => isStr(v) && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const isTime = (v) => isStr(v) && /^\d{2}:\d{2}$/.test(v);
+  // Executa uma ferramenta, validando a entrada (com eager_input_streaming a API não valida por nós)
+  function runTool(name, input) {
+    if (!input || typeof input !== 'object') throw new Error('entrada inválida');
+    switch (name) {
+      case 'criar_tarefa': {
+        if (!isStr(input.titulo)) throw new Error('titulo é obrigatório');
+        if (input.data != null && !isDate(input.data)) throw new Error('data deve ser AAAA-MM-DD');
+        const prio = { baixa: 1, media: 2, alta: 3 }[input.prioridade] || 2;
+        addTask({ title: cap(input.titulo.trim()), date: input.data || today(), prio, tag: isStr(input.categoria) ? input.categoria.trim() : '' });
+        return { ok: true, action: `Tarefa criada: ${cap(input.titulo.trim())}` };
+      }
+      case 'criar_compromisso': {
+        if (!isStr(input.titulo) || !isDate(input.data)) throw new Error('titulo e data (AAAA-MM-DD) são obrigatórios');
+        if (input.inicio != null && !isTime(input.inicio)) throw new Error('inicio deve ser HH:MM');
+        if (input.fim != null && !isTime(input.fim)) throw new Error('fim deve ser HH:MM');
+        const ev = createEvent({ title: input.titulo.trim(), date: input.data, start: input.inicio || '', end: input.fim || '', place: isStr(input.local) ? input.local : '' });
+        return { ok: true, action: `Compromisso criado: ${ev.title} · ${fmtDate(ev.date)}${ev.start ? ' ' + ev.start : ''}` };
+      }
+      case 'concluir_tarefa': {
+        const t = state.tasks.find((x) => x.id === input.id);
+        if (!t) throw new Error('tarefa não encontrada');
+        completeTask(t);
+        return { ok: true, action: `Tarefa concluída: ${t.title}` };
+      }
+      case 'excluir_compromisso': {
+        const ev = state.events.find((x) => x.id === input.id);
+        if (!ev) throw new Error('compromisso não encontrado');
+        state.events = state.events.filter((x) => x !== ev); save(); render();
+        return { ok: true, action: `Compromisso removido: ${ev.title}` };
+      }
+      case 'abrir_tela': {
+        if (!VIEW_NAMES[input.tela]) throw new Error('tela inválida');
+        go(input.tela);
+        return { ok: true, action: `Abrindo ${VIEW_NAMES[input.tela]}` };
+      }
+      default: throw new Error('ferramenta desconhecida');
+    }
+  }
+
+  function contextBlock() {
+    const now = new Date();
+    const from = ymd(addDays(now, -1)), to = ymd(addDays(now, 21));
+    const evs = state.events.filter((e) => e.date >= from && e.date <= to)
+      .sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')))
+      .map((e) => `- [${e.id}] ${e.date} ${e.start ? e.start + (e.end ? '-' + e.end : '') : 'dia todo'} · ${e.title}${e.place ? ' · ' + e.place : ''}`);
+    const tks = pendingTasks().sort(taskSort)
+      .map((t) => `- [${t.id}] ${t.title} · ${t.date || 'sem data'} · prioridade ${['', 'baixa', 'média', 'alta'][t.prio]}${t.tag ? ' · ' + t.tag : ''}`);
+    const ig = igData();
+    let igLine = 'Instagram: carregando.';
+    if (ig) {
+      const k = kpis(ig, 7), k30 = kpis(ig, 30);
+      const v = (x) => x.value == null ? 'n/d' : x.fmt ? x.fmt(x.value) : Math.round(x.value);
+      const top = [...ig.media].sort((a, b) => ((b.like_count || 0) + (b.comments_count || 0)) - ((a.like_count || 0) + (a.comments_count || 0))).slice(0, 3)
+        .map((m) => `"${(m.caption || '').slice(0, 60)}" (${m.like_count} curtidas, ${m.comments_count} comentários)`).join('; ');
+      igLine = `Instagram${ig.demo ? ' (DADOS DE EXEMPLO, conta não conectada)' : ''}: @${ig.profile.username}, ${ig.profile.followers_count} seguidores, variação 7d: ${deltaFollowers(ig.days, 7) ?? 'n/d'}. 7 dias: alcance ${v(k[0])}, visualizações ${v(k[1])}, interações ${v(k[2])}, engajamento ${v(k[3])}. 30 dias: alcance ${v(k30[0])}, interações ${v(k30[2])}. Posts com mais engajamento: ${top}.`;
+    }
+    return `<contexto>
+Agora: ${now.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${nowHM()} (hoje = ${today()}).
+Nome do usuário: ${state.name || 'não informado'}.
+Compromissos (de ontem até 3 semanas):
+${evs.join('\n') || '- nenhum'}
+Tarefas pendentes:
+${tks.join('\n') || '- nenhuma'}
+${igLine}
+</contexto>`;
+  }
+
+  // Histórico da conversa com a IA (só cresce; recomeça quando fica longo)
+  let apiHistory = [];
+  let aiClient = null;
+  function client() {
+    if (!aiClient || aiClient.apiKey !== state.ai.key) aiClient = new window.Anthropic({ apiKey: state.ai.key, dangerouslyAllowBrowser: true });
+    return aiClient;
+  }
+
+  async function claudeBrain(text) {
+    if (apiHistory.length > 40) apiHistory = [];
+    apiHistory.push({ role: 'user', content: [{ type: 'text', text: contextBlock() }, { type: 'text', text }] });
+
+    let full = '';
+    for (let round = 0; round < 6; round++) {
+      const bubble = addMsg('edie', '');
+      bubble.el.classList.add('typing');
+      let shown = '', pending = '';
+      const flush = (all) => {
+        // fala frase por frase enquanto o texto chega
+        const re = all ? /[\s\S]+/ : /[\s\S]*?[.!?…:](?=\s)/;
+        let m;
+        while ((m = pending.match(re)) && m[0].trim()) {
+          speak(m[0]); pending = pending.slice(m[0].length);
+          if (all) break;
+        }
+      };
+      const stream = client().beta.messages.stream({
+        model: MODEL,
+        max_tokens: 16000,
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
+        output_config: { effort: 'low' },
+        system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+        tools: TOOLS,
+        messages: apiHistory,
+      });
+      stream.on('text', (delta) => {
+        if (thinking) { thinking = false; }
+        shown += delta; pending += delta;
+        bubble.set(shown);
+        flush(false);
+      });
+      let msg;
+      try { msg = await stream.finalMessage(); }
+      finally { bubble.el.classList.remove('typing'); }
+      flush(true);
+      if (!shown.trim()) { state.chat.splice(state.chat.indexOf(bubble.m), 1); bubble.el.remove(); save(); }
+      full += shown;
+
+      // Guarda a resposta completa (inclui blocos de raciocínio/fallback) sem alterar
+      apiHistory.push({ role: 'assistant', content: msg.content });
+
+      if (msg.stop_reason === 'refusal') {
+        const r = 'Desculpa, com isso eu não posso ajudar.';
+        addMsg('edie', r); speak(r); apiHistory = [];
+        return r;
+      }
+      if (msg.stop_reason !== 'tool_use') break;
+
+      const results = [];
+      for (const block of msg.content) {
+        if (block.type !== 'tool_use') continue;
+        try {
+          const out = runTool(block.name, block.input);
+          addMsg('action', '⚡ ' + out.action);
+          results.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(out) });
+        } catch (err) {
+          results.push({ type: 'tool_result', tool_use_id: block.id, content: 'Erro: ' + err.message, is_error: true });
+        }
+      }
+      apiHistory.push({ role: 'user', content: results });
+    }
+    return full.trim() || 'Feito!';
+  }
+
+  function aiErrorText(err) {
+    apiHistory = [];
+    const A = window.Anthropic;
+    console.error(err);
+    if (A && err instanceof A.AuthenticationError) return 'Minha chave da API do Claude parece inválida. Confere em Configurações?';
+    if (A && err instanceof A.PermissionDeniedError) return 'A chave não tem permissão para usar esse modelo.';
+    if (A && err instanceof A.RateLimitError) return 'Estou recebendo pedidos demais agora. Tenta de novo em alguns segundos.';
+    if (A && err instanceof A.APIConnectionError) return 'Não consegui me conectar à internet para pensar. Verifique sua conexão.';
+    if (A && err instanceof A.APIError) return 'Tive um problema ao falar com o Claude: ' + (err.message || err.status);
+    return 'Algo deu errado: ' + err.message;
+  }
+
+  // ---------- Ligações da interface ----------
   $('#commandForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    runCommand($('#commandInput').value);
-    $('#commandInput').value = '';
+    const v = $('#commandInput').value; $('#commandInput').value = '';
+    ask(v, { fromBar: true });
   });
+  $('#chatForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const v = $('#chatInput').value; $('#chatInput').value = '';
+    ask(v);
+  });
+  $('#topMic').addEventListener('click', () => listen(currentView !== 'conversa'));
+  $('#chatMic').addEventListener('click', () => listen());
+  $('#orb').addEventListener('click', () => {
+    if (speakingCount) { stopSpeaking(); setOrb('idle'); return; }
+    listen();
+  });
+  $('#hearDay').addEventListener('click', () => {
+    const t = briefing();
+    stopSpeaking();
+    if (synth) speak(t, true); else toast(t);
+  });
+  $('#optVoice').checked = state.voice.on !== false;
+  $('#optHands').checked = !!state.voice.handsFree;
+  $('#optVoice').addEventListener('change', () => { state.voice.on = $('#optVoice').checked; if (!state.voice.on) stopSpeaking(); save(); });
+  $('#optHands').addEventListener('change', () => { state.voice.handsFree = $('#optHands').checked; save(); });
+
   document.addEventListener('keydown', (e) => {
     if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $('#commandInput').focus(); }
-    if (e.key === 'Escape' && document.activeElement === $('#commandInput')) $('#commandInput').blur();
+    if (e.key === 'Escape') { if (document.activeElement === $('#commandInput')) $('#commandInput').blur(); stopSpeaking(); }
+    if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); listen(currentView !== 'conversa'); }
   });
 
   // ---------- Configurações ----------
@@ -561,6 +1026,23 @@
   $('#cfgIgToken').value = state.ig.token;
   $('#cfgGcalId').value = state.gcal.id;
   $('#cfgGcalKey').value = state.gcal.key;
+  $('#cfgAiKey').value = state.ai.key;
+  $('#cfgRate').value = state.voice.rate;
+  $('#cfgPitch').value = state.voice.pitch;
+  function aiBadge() {
+    $('#aiBadge').textContent = state.ai.key ? 'Claude ativo' : 'básica';
+    $('#aiBadge').classList.toggle('off', !state.ai.key);
+  }
+  aiBadge();
+  $('#aiForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    state.ai.key = $('#cfgAiKey').value.trim(); apiHistory = []; save(); aiBadge();
+    toast(state.ai.key ? 'Pronto! Agora a Edie conversa sobre qualquer assunto.' : 'Chave removida');
+  });
+  $('#aiClear').onclick = () => { state.ai.key = ''; $('#cfgAiKey').value = ''; apiHistory = []; save(); aiBadge(); toast('Chave removida'); };
+  const readVoiceForm = () => { state.voice.name = $('#cfgVoice').value; state.voice.rate = +$('#cfgRate').value; state.voice.pitch = +$('#cfgPitch').value; };
+  $('#voiceForm').addEventListener('submit', (e) => { e.preventDefault(); readVoiceForm(); save(); toast('Voz salva'); });
+  $('#voiceTest').onclick = () => { readVoiceForm(); stopSpeaking(); speak(`Oi${state.name ? ', ' + state.name : ''}! Eu sou a Edie. É assim que eu vou falar com você.`, true); };
 
   $('#profileForm').addEventListener('submit', (e) => {
     e.preventDefault(); state.name = $('#cfgName').value.trim(); save(); render(); toast('Salvo!');
@@ -643,7 +1125,7 @@
 
   // Backup
   $('#exportBtn').onclick = () => {
-    const copy = JSON.parse(JSON.stringify(state)); copy.ig.token = ''; copy.gcal.key = '';
+    const copy = JSON.parse(JSON.stringify(state)); copy.ig.token = ''; copy.gcal.key = ''; copy.ai.key = '';
     const blob = new Blob([JSON.stringify(copy, null, 2)], { type: 'application/json' });
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `edie-backup-${today()}.json` });
     a.click(); URL.revokeObjectURL(a.href);
@@ -652,9 +1134,9 @@
     const f = e.target.files[0]; if (!f) return;
     try {
       const data = JSON.parse(await f.text());
-      const keep = { token: state.ig.token, key: state.gcal.key };
+      const keep = { token: state.ig.token, key: state.gcal.key, ai: state.ai.key };
       state = Object.assign(defaults(), data);
-      state.ig.token ||= keep.token; state.gcal.key ||= keep.key;
+      state.ig.token ||= keep.token; state.gcal.key ||= keep.key; state.ai.key ||= keep.ai;
       save(); render(); toast('Backup restaurado');
     } catch { toast('Arquivo inválido'); }
     e.target.value = '';
@@ -667,11 +1149,11 @@
   // ---------- Render geral ----------
   function render() {
     $('#todayChip').textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
-    ({ hoje: renderHoje, agenda: renderAgenda, tarefas: renderTarefas, instagram: renderInstagram, config: () => {} }[currentView] || renderHoje)();
+    ({ hoje: renderHoje, agenda: renderAgenda, tarefas: renderTarefas, instagram: renderInstagram, conversa: renderChat, config: () => {} }[currentView] || renderHoje)();
   }
 
   const initial = location.hash.slice(1);
-  go(['hoje', 'agenda', 'tarefas', 'instagram', 'config'].includes(initial) ? initial : 'hoje');
+  go(['hoje', 'conversa', 'agenda', 'tarefas', 'instagram', 'config'].includes(initial) ? initial : 'hoje');
   refreshIg();
   // Atualiza "agora" e saudação a cada minuto
   setInterval(() => { if (currentView === 'hoje') renderHoje(); }, 60000);

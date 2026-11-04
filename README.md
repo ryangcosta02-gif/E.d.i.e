@@ -1,6 +1,8 @@
 # e.d.i.e
 
-Seu assistente pessoal: um painel único para resolver o dia — agenda, tarefas e métricas do Instagram.
+Seu assistente pessoal: um painel único para resolver o dia — agenda, tarefas, métricas do Instagram e uma assistente que conversa com você **por voz**.
+
+Visual: fundo preto com destaques em laranja e azul.
 
 ## Como usar
 
@@ -11,21 +13,33 @@ No celular, use "Adicionar à tela inicial" para ter o e.d.i.e como app.
 
 | Tela | O que faz |
 |---|---|
-| **Hoje** | Saudação, resumo do dia, compromissos de hoje, o que falta fazer e o resumo do Instagram da semana |
+| **Hoje** | Saudação, resumo do dia, compromissos de hoje, o que falta fazer e o resumo do Instagram da semana. Botão "Edie, me fala do meu dia" lê o resumo em voz alta |
+| **Fale com a Edie** | Conversa por voz: toque no orbe (ou `Ctrl+Espaço`), fale, e a Edie responde falando. Modo mãos livres continua ouvindo depois de cada resposta |
 | **Agenda** | Calendário mensal, criar/editar/excluir compromissos, tarefas aparecem nos dias |
 | **Tarefas** | Lista com prioridade, data e categoria; filtros Hoje / Pendentes / Atrasadas / Feitas |
 | **Instagram** | Seguidores, alcance, visualizações, interações, taxa de engajamento, gráficos e posts mais engajados (7 ou 30 dias) |
 | **Configurações** | Seu nome, conexão com Instagram e Google Agenda, backup |
 
-### Fale com a Edie (barra de comando)
+### Fale com a Edie (voz ou texto)
 
-Aperte `/` em qualquer lugar e escreva:
+- **Falar:** toque no microfone (barra do topo ou tela "Fale com a Edie") ou aperte `Ctrl+Espaço`. Funciona no Chrome, Edge e Safari (precisa permitir o microfone).
+- **Ouvir:** a Edie responde com a voz do sistema em português. Escolha a voz, velocidade e tom em Configurações → Voz da Edie.
+- **Escrever:** aperte `/` em qualquer lugar.
+
+Exemplos:
 
 - `tarefa ligar pro contador amanhã urgente` → cria tarefa de prioridade alta para amanhã
 - `evento reunião sexta 15h` → cria compromisso na próxima sexta às 15:00
 - `dentista 10/12 às 9h30` → um horário já vira compromisso
-- `agenda`, `instagram`, `tarefas` → abre a tela
-- `resumo` → mostra o resumo do dia
+- `o que eu tenho amanhã?`, `qual meu próximo compromisso?`
+- `o que falta fazer?`, `terminei gravar reels`
+- `como está meu Instagram?`
+- `abrir agenda`, `ver instagram`
+
+### Dois níveis de inteligência
+
+- **Básica (padrão, grátis):** entende os comandos acima direto no navegador.
+- **Claude (conversa livre):** cole uma chave da API do Claude em Configurações → Inteligência da Edie. Aí ela conversa sobre qualquer assunto, entende o que você fala do seu jeito, e cria/conclui tarefas e compromissos por você. A chave fica só no seu navegador e é enviada apenas para a API da Anthropic. O SDK oficial está em `vendor/anthropic-sdk.js` (empacotado de `@anthropic-ai/sdk@1.0.0`) para funcionar abrindo o arquivo direto.
 
 ## Conexões
 
@@ -47,6 +61,7 @@ Tudo fica salvo no navegador (localStorage). Os tokens nunca saem do seu aparelh
 
 - Login com Google (OAuth) para ler e escrever na agenda privada
 - Sincronizar entre aparelhos (backend)
-- Edie com IA para responder perguntas e planejar o dia
+- Edie avisar por voz antes dos compromissos
+- Palavra de ativação ("Edie…") sem precisar tocar
 - Notificações de compromissos
 - Mais módulos: finanças, metas, hábitos
