@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>e.d.i.e</title>
+  <meta name="theme-color" content="#0f1117" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%237c5cff'/><text x='32' y='42' font-size='28' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>e</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Barra lateral -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="logo">e</div>
+        <div>
+          <div class="brand-name">e.d.i.e</div>
+          <div class="brand-sub">seu assistente</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="hoje"><span class="ico">◎</span>Hoje</button>
+        <button class="nav-item" data-view="agenda"><span class="ico">▦</span>Agenda</button>
+        <button class="nav-item" data-view="tarefas"><span class="ico">✓</span>Tarefas</button>
+        <button class="nav-item" data-view="instagram"><span class="ico">◈</span>Instagram</button>
+        <button class="nav-item" data-view="config"><span class="ico">⚙</span>Configurações</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="kbd-hint">Atalho: <kbd>/</kbd> fala com a Edie</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- Barra de comando da Edie -->
+      <header class="topbar">
+        <button class="menu-btn" id="menuBtn" aria-label="Menu">☰</button>
+        <form class="command" id="commandForm" autocomplete="off">
+          <span class="command-ico">✦</span>
+          <input id="commandInput" placeholder='Fale com a Edie… ex: "tarefa ligar pro contador amanhã" ou "evento reunião sexta 15h"' />
+        </form>
+        <div class="today-chip" id="todayChip"></div>
+      </header>
+      <div class="toast" id="toast"></div>
+
+      <!-- HOJE -->
+      <section class="view active" id="view-hoje">
+        <div class="hero">
+          <h1 id="greeting">Olá</h1>
+          <p id="summaryLine" class="muted"></p>
+        </div>
+        <div class="grid grid-3">
+          <div class="card stat"><div class="stat-label">Compromissos hoje</div><div class="stat-value" id="statEventos">0</div></div>
+          <div class="card stat"><div class="stat-label">Tarefas pendentes</div><div class="stat-value" id="statTarefas">0</div></div>
+          <div class="card stat"><div class="stat-label">Seguidores no Instagram</div><div class="stat-value" id="statSeguidores">—</div><div class="stat-delta" id="statSeguidoresDelta"></div></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="card-head"><h2>Agenda de hoje</h2><button class="link" data-goto="agenda">Ver agenda →</button></div>
+            <ul class="list" id="hojeEventos"></ul>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>O que falta fazer</h2><button class="link" data-goto="tarefas">Todas →</button></div>
+            <ul class="list" id="hojeTarefas"></ul>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Instagram — últimos 7 dias</h2><button class="link" data-goto="instagram">Métricas completas →</button></div>
+          <div class="grid grid-4" id="hojeInsta"></div>
+        </div>
+      </section>
+
+      <!-- AGENDA -->
+      <section class="view" id="view-agenda">
+        <div class="view-head">
+          <h1>Agenda</h1>
+          <div class="actions">
+            <button class="btn ghost" id="prevMonth">‹</button>
+            <span class="month-label" id="monthLabel"></span>
+            <button class="btn ghost" id="nextMonth">›</button>
+            <button class="btn ghost" id="todayBtn">Hoje</button>
+            <button class="btn primary" id="addEventBtn">+ Compromisso</button>
+          </div>
+        </div>
+        <div class="agenda-layout">
+          <div class="card calendar-card">
+            <div class="cal-weekdays"><span>Dom</span><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span></div>
+            <div class="cal-grid" id="calGrid"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2 id="dayTitle">Dia</h2></div>
+            <ul class="list" id="dayEvents"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAREFAS -->
+      <section class="view" id="view-tarefas">
+        <div class="view-head">
+          <h1>Tarefas</h1>
+          <div class="actions">
+            <div class="seg" id="taskFilter">
+              <button data-f="hoje" class="active">Hoje</button>
+              <button data-f="pendentes">Pendentes</button>
+              <button data-f="atrasadas">Atrasadas</button>
+              <button data-f="feitas">Feitas</button>
+            </div>
+          </div>
+        </div>
+        <form class="card task-add" id="taskForm">
+          <input id="taskTitle" placeholder="O que precisa ser feito?" required />
+          <input id="taskDate" type="date" />
+          <select id="taskPrio">
+            <option value="2">Prioridade média</option>
+            <option value="3">Alta</option>
+            <option value="1">Baixa</option>
+          </select>
+          <input id="taskTag" placeholder="Categoria (ex: Instagram)" list="tagList" />
+          <datalist id="tagList"></datalist>
+          <button class="btn primary">Adicionar</button>
+        </form>
+        <div class="card">
+          <ul class="list tasks" id="taskList"></ul>
+        </div>
+      </section>
+
+      <!-- INSTAGRAM -->
+      <section class="view" id="view-instagram">
+        <div class="view-head">
+          <div>
+            <h1>Instagram</h1>
+            <p class="muted" id="igSource"></p>
+          </div>
+          <div class="actions">
+            <div class="seg" id="igPeriod">
+              <button data-d="7" class="active">7 dias</button>
+              <button data-d="30">30 dias</button>
+            </div>
+            <button class="btn ghost" id="igRefresh">Atualizar</button>
+          </div>
+        </div>
+        <div class="card ig-profile" id="igProfile"></div>
+        <div class="grid grid-4" id="igKpis"></div>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="card-head"><h2>Alcance por dia</h2></div>
+            <div class="chart" id="igChartReach"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Seguidores</h2></div>
+            <div class="chart" id="igChartFollowers"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Posts recentes</h2><span class="muted small">ordenados por engajamento</span></div>
+          <div class="posts" id="igPosts"></div>
+        </div>
+      </section>
+
+      <!-- CONFIG -->
+      <section class="view" id="view-config">
+        <div class="view-head"><h1>Configurações</h1></div>
+        <div class="grid grid-2">
+          <form class="card form" id="profileForm">
+            <h2>Você</h2>
+            <label>Como a Edie deve te chamar?<input id="cfgName" placeholder="Seu nome" /></label>
+            <button class="btn primary">Salvar</button>
+          </form>
+          <form class="card form" id="igForm">
+            <h2>Conectar Instagram</h2>
+            <p class="muted small">Precisa ser conta Profissional (Criador ou Empresa). Gere um token de acesso no
+              <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener">Meta for Developers</a>
+              (produto "Instagram API com login do Instagram", permissões <code>instagram_business_basic</code> e <code>instagram_business_manage_insights</code>).</p>
+            <label>Token de acesso<input id="cfgIgToken" type="password" placeholder="IGAA…" /></label>
+            <div class="row">
+              <button class="btn primary">Conectar</button>
+              <button class="btn ghost" type="button" id="igDisconnect">Usar dados de exemplo</button>
+            </div>
+          </form>
+          <form class="card form" id="gcalForm">
+            <h2>Google Agenda</h2>
+            <p class="muted small">Opção 1: importe um arquivo <code>.ics</code> (Google Agenda → Configurações → Importar e exportar → Exportar).</p>
+            <label class="file">Importar .ics<input type="file" id="icsFile" accept=".ics,text/calendar" /></label>
+            <p class="muted small">Opção 2: leitura direta de uma agenda <b>pública</b> com uma chave de API do Google Cloud (Calendar API ativada).</p>
+            <label>ID da agenda<input id="cfgGcalId" placeholder="seuemail@gmail.com" /></label>
+            <label>Chave de API<input id="cfgGcalKey" type="password" placeholder="AIza…" /></label>
+            <div class="row">
+              <button class="btn primary">Sincronizar</button>
+              <button class="btn ghost" type="button" id="gcalClear">Remover eventos importados</button>
+            </div>
+          </form>
+          <div class="card form">
+            <h2>Seus dados</h2>
+            <p class="muted small">Tudo fica salvo neste navegador. Faça backup para levar para outro aparelho.</p>
+            <div class="row">
+              <button class="btn ghost" id="exportBtn">Exportar backup</button>
+              <label class="btn ghost file-btn">Importar backup<input type="file" id="importFile" accept=".json" /></label>
+            </div>
+            <button class="btn danger" id="resetBtn">Apagar tudo</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal de evento -->
+  <dialog id="eventDialog">
+    <form method="dialog" class="form" id="eventForm">
+      <h2 id="eventDialogTitle">Novo compromisso</h2>
+      <label>Título<input id="evTitle" required /></label>
+      <div class="row">
+        <label>Data<input id="evDate" type="date" required /></label>
+        <label>Início<input id="evStart" type="time" /></label>
+        <label>Fim<input id="evEnd" type="time" /></label>
+      </div>
+      <label>Local / link<input id="evPlace" /></label>
+      <label>Notas<textarea id="evNotes" rows="3"></textarea></label>
+      <div class="row end">
+        <button type="button" class="btn danger" id="evDelete">Excluir</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+        <button value="save" class="btn primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
