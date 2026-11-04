@@ -371,7 +371,7 @@
     const inter = t.total_interactions ?? sumLast(ig.days, 'interactions', n);
     const engaged = t.accounts_engaged ?? sumLast(ig.days, 'engaged', n);
     const rate = reach && inter != null ? (inter / reach) * 100 : null;
-    const prevReach = ig.demo ? sumLast(ig.days.slice(0, -n), 'reach', n) : null;
+    const prevReach = ig.days.length >= 2 * n ? sumLast(ig.days.slice(0, -n), 'reach', n) : null;
     return [
       { label: 'Alcance', value: reach, prev: prevReach },
       { label: 'Visualizações', value: views },
@@ -400,14 +400,14 @@
     }
     $('#igSource').innerHTML = ig.demo
       ? 'Dados de exemplo · <button class="link" data-goto="config">Conectar minha conta</button>'
-      : `Conta conectada · atualizado ${new Date(ig.fetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+      : `${ig.sourceLabel || 'Conta conectada'} · atualizado ${new Date(ig.fetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
     const p = ig.profile;
     const initial = (p.username || '?')[0].toUpperCase();
     $('#igProfile').innerHTML = `
       <div class="avatar">${p.profile_picture_url ? `<img src="${esc(p.profile_picture_url)}" alt="">` : `<div>${initial}</div>`}</div>
       <div><div style="font-weight:700;font-size:1.1rem">@${esc(p.username)}</div><div class="muted">${esc(p.name || '')}</div></div>
       <div class="nums">
-        <div><b>${fmtNum(p.media_count)}</b><span class="muted small">posts</span></div>
+        <div><b>${fmtNum(p.media_count)}</b><span class="muted small">${ig.mediaLabel || 'posts'}</span></div>
         <div><b>${fmtNum(p.followers_count)}</b><span class="muted small">seguidores</span></div>
         <div><b>${fmtNum(p.follows_count)}</b><span class="muted small">seguindo</span></div>
       </div>`;

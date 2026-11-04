@@ -107,15 +107,121 @@ STORAGE = r"""  // ---------- Armazenamento ----------
 """
 js = cut(js, "  // ---------- Armazenamento ----------", "  // ---------- Navegação ----------", STORAGE)
 
+METRICOOL = r"""  // Instagram de verdade pelo conector Metricool da conta do claude.ai
+  const MC = 'Metricool Social Media Management';
+  const MC_CACHE = 'edie:ig-metricool';
+  const EVO = ['IGEV01', 'IGEV02', 'IGEV05', 'IGEV06', 'IGEV37', 'IGEV38', 'IGEV42', 'IGEV43', 'IGEV44'];
+  const POSTS = ['IGPO02', 'IGPO03', 'IGPO06', 'IGPO07', 'IGPO13', 'IGPO08', 'IGPO14', 'IGPO12', 'IGPO28'];
+  const REELS = ['IGRE02', 'IGRE03', 'IGRE06', 'IGRE10', 'IGRE07', 'IGRE11', 'IGRE09', 'IGRE23'];
+  let igReal = null, igStatus = '', mcBrand = null, mcp = null;
+  try { igReal = JSON.parse(localStorage.getItem(MC_CACHE) || 'null'); } catch {}
+  const num = (v) => (v == null || v === '' || isNaN(+v) ? null : +v);
+  const tzOffset = () => { const m = -new Date().getTimezoneOffset(); return `${m >= 0 ? '+' : '-'}${pad(Math.floor(Math.abs(m) / 60))}:${pad(Math.abs(m) % 60)}`; };
+  const isoDay = (d, end) => `${ymd(d)}T${end ? '23:59:59' : '00:00:00'}${tzOffset()}`;
+  const stamp = (s) => { s = String(s || ''); return s.length >= 8 ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` + (s.length >= 12 ? `T${s.slice(8, 10)}:${s.slice(10, 12)}:00` : 'T12:00:00') : ''; };
+  const MC_ERR = {
+    server_not_connected: 'O Metricool não está conectado. Conecte em claude.ai → Configurações → Conectores.',
+    needs_reauth: 'A conexão com o Metricool expirou. Reconecte em claude.ai → Configurações → Conectores.',
+    not_in_manifest: 'Você não permitiu que a Edie use o Metricool. Toque em Atualizar para permitir.',
+    approval_required: 'A Edie precisa da sua permissão para usar o Metricool. Toque em Atualizar.',
+    selection_required: 'Você tem mais de um Metricool conectado. Escolha qual usar no aviso do claude.ai.',
+    blocked_by_policy: 'Sua organização bloqueou o uso do Metricool aqui.',
+    server_unavailable: 'O Metricool não respondeu agora. Mostrando os últimos dados que eu tinha.',
+  };
+  async function mcCall(tool, input, fresh) {
+    const r = await mcp.callTool(MC, tool, input, { cache: fresh ? { staleTime: 0, gcTime: 86400000, refresh: true } : { staleTime: 15 * 60000, gcTime: 86400000 } });
+    let p = r.payload;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch {} }
+    return p;
+  }
+  async function mcBrandInfo(fresh) {
+    if (mcBrand && !fresh) return mcBrand;
+    const p = await mcCall('getBrandSettings', {}, fresh);
+    const brands = (p && p.data) || [];
+    const b = brands.find((x) => x.networksData && x.networksData.instagramData) || brands[0];
+    if (!b) throw { code: 'no_brand' };
+    mcBrand = { id: String(b.id), username: (b.networksData && b.networksData.instagramData) || '', tz: b.timezone };
+    return mcBrand;
+  }
+  async function mcRows(metrics, fromDays, fresh, from, to) {
+    const b = await mcBrandInfo();
+    const p = await mcCall('getAnalyticsDataByMetrics', {
+      brandId: b.id, metrics,
+      from: from || isoDay(addDays(new Date(), -fromDays)), to: to || isoDay(new Date(), true),
+    }, fresh);
+    return (p && p.rows) || [];
+  }
+  async function fetchMetricool(fresh) {
+    const b = await mcBrandInfo(fresh);
+    const [evo, posts, reels] = await Promise.all([
+      mcRows(EVO, 59, fresh),
+      mcRows(POSTS, 59, fresh).catch(() => []),
+      mcRows(REELS, 59, fresh).catch(() => []),
+    ]);
+    const days = evo.map((r) => ({
+      date: stamp(r[r.length - 1]).slice(0, 10), followers: num(r[0]), following: num(r[1]), views: num(r[2]), reach: num(r[3]),
+      content: num(r[4]), interactions: num(r[5]) ?? 0, engaged: num(r[6]), gained: num(r[7]), lost: num(r[8]),
+    })).filter((d) => d.date).sort((a, b2) => a.date.localeCompare(b2.date));
+    const last = [...days].reverse().find((d) => d.followers != null) || {};
+    const media = [
+      ...posts.map((r) => ({ timestamp: stamp(r[0]), caption: r[1], permalink: r[2], media_type: String(r[3] || '').includes('CAROUSEL') ? 'CAROUSEL_ALBUM' : 'IMAGE', like_count: num(r[4]) ?? 0, comments_count: num(r[5]) ?? 0, reach: num(r[6]), interactions: num(r[7]), views: num(r[8]) })),
+      ...reels.map((r) => ({ timestamp: stamp(r[0]), caption: r[1], permalink: r[2], media_type: 'VIDEO', like_count: num(r[3]) ?? 0, comments_count: num(r[4]) ?? 0, reach: num(r[5]), interactions: num(r[6]), views: num(r[7]) })),
+    ].filter((m) => m.permalink).sort((a, b2) => (b2.timestamp || '').localeCompare(a.timestamp || ''));
+    const content30 = days.slice(-30).reduce((s, d) => s + (d.content || 0), 0);
+    igReal = {
+      demo: false, sourceLabel: 'Conectado pelo Metricool', fetchedAt: Date.now(),
+      profile: { username: b.username, name: 'Instagram via Metricool', followers_count: last.followers ?? null, follows_count: last.following ?? null, media_count: content30 },
+      mediaLabel: 'posts em 30 dias', days, media,
+    };
+    try { localStorage.setItem(MC_CACHE, JSON.stringify(igReal)); } catch {}
+    return igReal;
+  }
+  function igData() { return igReal || demoIg(); }
+  let igBusy = false;
+  async function refreshIg(fresh = false) {
+    if (igBusy) return;
+    if (!mcp) {
+      mcp = window.claude && window.claude.use ? await window.claude.use('mcp').catch(() => null) : null;
+      if (!mcp) { igStatus = 'Dados de exemplo: esta página não consegue usar conectores aqui.'; render(); return; }
+    }
+    igBusy = true; igStatus = igReal ? '' : 'Buscando seus dados no Metricool…';
+    if (currentView === 'instagram') $('#igSource').textContent = 'Atualizando pelo Metricool…';
+    try {
+      await fetchMetricool(fresh);
+      igStatus = '';
+      if (fresh) toast('Instagram atualizado');
+    } catch (e) {
+      const code = e && e.code;
+      igStatus = code === 'no_brand' ? 'Não achei nenhuma marca no seu Metricool.'
+        : code === 'tool_error' ? 'O Metricool respondeu com erro: ' + (e.message || '').slice(0, 140)
+        : MC_ERR[code] || 'Não consegui falar com o Metricool agora. Toque em Atualizar para tentar de novo.';
+      if (['server_not_connected', 'needs_reauth', 'not_in_manifest', 'blocked_by_policy'].includes(code)) {
+        igReal = null; try { localStorage.removeItem(MC_CACHE); } catch {}
+      }
+      if (igReal) toast(igStatus);
+    } finally { igBusy = false; render(); }
+  }
+  // Para a conversa: totais de qualquer período pedido
+  async function igPeriod_(from, to) {
+    const rows = await mcRows(EVO, 0, false, `${from}T00:00:00${tzOffset()}`, `${to}T23:59:59${tzOffset()}`);
+    const days = rows.map((r) => ({ date: stamp(r[r.length - 1]).slice(0, 10), followers: num(r[0]), views: num(r[2]), reach: num(r[3]), content: num(r[4]), interactions: num(r[5]), engaged: num(r[6]), gained: num(r[7]), lost: num(r[8]) }))
+      .sort((a, b2) => a.date.localeCompare(b2.date));
+    const sum = (k) => days.reduce((s, d) => s + (d[k] || 0), 0);
+    const f = days.filter((d) => d.followers != null);
+    return { periodo: { de: from, ate: to }, dias_com_dados: days.length, seguidores_inicio: f[0]?.followers ?? null, seguidores_fim: f[f.length - 1]?.followers ?? null,
+      alcance_somado_por_dia: sum('reach'), visualizacoes: sum('views'), interacoes: sum('interactions'), contas_engajadas: sum('engaged'),
+      conteudos_publicados: sum('content'), seguidores_ganhos: sum('gained'), seguidores_perdidos: sum('lost') };
+  }
+
+"""
+
 # Instagram: só dados de exemplo (a página não acessa sites externos)
 js = cut(js, "  const IG_API", "  // Dados de exemplo determinísticos", "  let igPeriod = 7;\n\n")
-js = cut(js, "  async function igGet(", "  function sumLast(", """  function igData() { return demoIg(); }
-  function refreshIg() {}
-
-""")
+js = cut(js, "  async function igGet(", "  function sumLast(", METRICOOL)
 js = replace(js, """'Dados de exemplo · <button class="link" data-goto="config">Conectar minha conta</button>'""",
-             """'Dados de exemplo. As métricas reais aparecem na versão da Edie no seu link do GitHub, conectada ao Instagram.'""")
-js = replace(js, "  $('#igRefresh').onclick = () => state.ig.token ? refreshIg(true) : toast('Conecte sua conta em Configurações para dados reais');\n", "")
+             """(igStatus || 'Dados de exemplo enquanto o Metricool não responde.')""")
+js = replace(js, "  $('#igRefresh').onclick = () => state.ig.token ? refreshIg(true) : toast('Conecte sua conta em Configurações para dados reais');\n",
+             "  $('#igRefresh').onclick = () => refreshIg(true);\n")
 
 # Conversa: cérebro = plano do Claude da pessoa
 js = replace(js, """    $('#brainInfo').innerHTML = state.ai.key ? `Inteligência: <b>Claude ${state.ai.model === 'claude-haiku-5-5' ? 'Haiku' : 'Opus'}</b> · conversa completa ✓` : 'Inteligência: <b>básica</b> (só dia, tarefas, agenda e Instagram)';
@@ -151,7 +257,20 @@ SAMPLE_BRAIN = r"""  // O plano do Claude de quem usa a página responde (capaci
   }
   let turns = []; // conversa em texto que a página guarda (Claude não guarda nada entre chamadas)
 
-  const sampleTools = TOOLS.map((t) => ({
+  const sampleTools = [...TOOLS, {
+    name: 'consultar_instagram',
+    description: 'Busca no Metricool os números do Instagram do usuário num período (alcance, visualizações, interações, seguidores ganhos e perdidos, conteúdos publicados). Use quando a pergunta for sobre um período que não está no contexto.',
+    input_schema: { type: 'object', properties: { de: { type: 'string', description: 'AAAA-MM-DD' }, ate: { type: 'string', description: 'AAAA-MM-DD' } }, required: ['de', 'ate'] },
+  }].map((t) => t.name === 'consultar_instagram' ? ({
+    name: t.name, description: t.description, inputSchema: t.input_schema,
+    async execute(input) {
+      const de = String(input.de || ''), ate = String(input.ate || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) throw new Error('use datas AAAA-MM-DD');
+      if (!mcp) throw new Error('Metricool não disponível nesta página');
+      try { return await igPeriod_(de, ate); }
+      catch (e) { throw new Error((e && (MC_ERR[e.code] || e.message)) || 'falha no Metricool'); }
+    },
+  }) : ({
     name: t.name,
     description: t.description,
     inputSchema: t.input_schema,
@@ -269,12 +388,12 @@ CONFIG = r"""  // ---------- Configurações ----------
 """
 js = cut(js, "  // ---------- Configurações ----------", "  // Importar .ics", CONFIG)
 js = cut(js, "  // Backup", "  // ---------- Render geral ----------", "")
-js = replace(js, "  refreshIg();\n", "  connectStore();\n")
+js = replace(js, "  refreshIg();\n", "  connectStore();\n  setTimeout(() => refreshIg(), 400);\n")
 js = replace(js, "    return state.ai.key\n      ? 'Não consegui entender. Pode repetir de outro jeito?'\n      : ", "    return ")
 js = replace(js, """'No modo básico eu só entendo pedidos sobre seu dia, tarefas, agenda e Instagram. Pra eu conversar sobre qualquer assunto, toque em "Ativar conversa completa".'""",
              """'No modo básico eu só entendo pedidos sobre seu dia, tarefas, agenda e Instagram. Para conversar sobre qualquer assunto, permita que a Edie use o Claude quando o claude.ai perguntar.'""")
 
-for gone in ("window.Anthropic", "state.ai.key", "localStorage.removeItem", "confirm(", "IG_API"):
+for gone in ("window.Anthropic", "state.ai.key", "confirm(", "IG_API"):
     if gone in js:
         raise SystemExit(f"sobrou referência a {gone!r} no JS")
 
@@ -285,7 +404,6 @@ body, n = re.subn(r"  <!-- Ativar conversa completa -->.*?</dialog>\s*", "", bod
 if n != 1:
     raise SystemExit("não achei a janela da chave de API no index.html")
 body = replace(body, """            <button class="btn blue" id="openAi" style="width:100%">✦ Ativar conversa completa</button>\n""", "")
-body = replace(body, """            <button class="btn ghost" id="igRefresh">Atualizar</button>\n""", "")
 body = replace(body, "<kbd>Ctrl</kbd>+<kbd>Espaço</kbd> falar com a Edie", "<kbd>Esc</kbd> interromper a Edie")
 
 CONFIG_HTML = """      <section class="view" id="view-config">
@@ -333,7 +451,8 @@ CONFIG_HTML = """      <section class="view" id="view-config">
           </div>
           <div class="card form">
             <h2>Instagram</h2>
-            <p class="muted small">Esta versão mostra métricas de exemplo, porque páginas dentro do claude.ai não conseguem se conectar ao Instagram. As métricas reais ficam na versão do seu link do GitHub.</p>
+            <p class="muted small">Os números do seu Instagram vêm do Metricool conectado à sua conta do claude.ai. Na primeira vez, o claude.ai pergunta se a Edie pode usar o Metricool: toque em Permitir.</p>
+            <p class="muted small">As fotos dos posts não aparecem aqui dentro (o claude.ai bloqueia imagens de outros sites), mas cada post abre no Instagram.</p>
           </div>
         </div>
       </section>

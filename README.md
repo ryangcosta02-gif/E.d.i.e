@@ -57,7 +57,7 @@ Sem token, a tela mostra dados de exemplo. O histórico de seguidores é montado
 
 Há uma segunda versão da Edie que roda dentro do claude.ai e usa o **seu próprio plano do Claude** como cérebro (sem chave de API e sem custo extra; o uso conta nos limites do plano). Agenda, tarefas e conversa ficam salvas numa área privada da sua conta, iguais no celular e no computador.
 
-Diferenças: lá dentro o microfone não é liberado (você escreve e ela responde com voz) e o Instagram mostra dados de exemplo.
+Diferenças: lá dentro o microfone não é liberado (você escreve e ela responde com voz). O Instagram vem do **Metricool** conectado na conta do claude.ai (seguidores, alcance, visualizações, interações e posts dos últimos 60 dias); as fotos dos posts não aparecem porque o claude.ai bloqueia imagens de outros sites.
 
 Ela é gerada a partir do mesmo código do app: depois de mudar `index.html`, `styles.css` ou `app.js`, rode `python3 tools/build_claude_page.py` para atualizar `claude-ai/edie.html`.
 
