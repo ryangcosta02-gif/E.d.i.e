@@ -69,8 +69,11 @@ kbd { background: var(--panel-2); border: 1px solid var(--line); border-radius: 
 @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,122,26,.55); } 50% { box-shadow: 0 0 0 8px rgba(255,122,26,0); } }
 .today-chip { color: var(--muted); font-size: .9rem; white-space: nowrap; }
 
-.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--panel-3); border: 1px solid var(--line); border-left: 3px solid var(--orange); padding: 10px 18px; border-radius: 10px; opacity: 0; pointer-events: none; transition: .25s; z-index: 50; max-width: 90vw; }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast { position: fixed; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%) translateY(20px); background: var(--panel-3); border: 1px solid var(--line); border-left: 3px solid var(--orange); padding: 12px 10px 12px 18px; border-radius: 12px; opacity: 0; pointer-events: none; transition: .25s; z-index: 50; width: max-content; max-width: min(560px, calc(100vw - 32px)); display: flex; align-items: flex-start; gap: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.5); cursor: pointer; line-height: 1.5; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.toast-text { flex: 1; min-width: 0; }
+.toast-close { flex: none; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: .95rem; padding: 0 4px; line-height: 1.5; }
+.toast-close:hover { color: var(--text); }
 
 .view { display: none; }
 .view.active { display: block; animation: fade .2s ease; }

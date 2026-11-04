@@ -72,8 +72,11 @@ kbd { background: var(--panel-2); border: 1px solid var(--line); border-radius: 
 @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,122,26,.55); } 50% { box-shadow: 0 0 0 8px rgba(255,122,26,0); } }
 .today-chip { color: var(--muted); font-size: .9rem; white-space: nowrap; }
 
-.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--panel-3); border: 1px solid var(--line); border-left: 3px solid var(--orange); padding: 10px 18px; border-radius: 10px; opacity: 0; pointer-events: none; transition: .25s; z-index: 50; max-width: 90vw; }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast { position: fixed; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%) translateY(20px); background: var(--panel-3); border: 1px solid var(--line); border-left: 3px solid var(--orange); padding: 12px 10px 12px 18px; border-radius: 12px; opacity: 0; pointer-events: none; transition: .25s; z-index: 50; width: max-content; max-width: min(560px, calc(100vw - 32px)); display: flex; align-items: flex-start; gap: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.5); cursor: pointer; line-height: 1.5; }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.toast-text { flex: 1; min-width: 0; }
+.toast-close { flex: none; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: .95rem; padding: 0 4px; line-height: 1.5; }
+.toast-close:hover { color: var(--text); }
 
 .view { display: none; }
 .view.active { display: block; animation: fade .2s ease; }
@@ -563,13 +566,24 @@ html, body { background: var(--bg); color: var(--text); }
   const WEEKDAYS = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
   const norm = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
+  // Aviso no rodapé: fica mais tempo quanto maior o texto (6 a 20 s),
+  // não some enquanto o dedo/mouse está em cima e fecha no ✕ ou com um toque.
   function toast(msg) {
     const t = $('#toast');
-    t.textContent = msg;
+    t.innerHTML = '';
+    const txt = document.createElement('span'); txt.className = 'toast-text'; txt.textContent = msg;
+    const close = document.createElement('button'); close.className = 'toast-close'; close.type = 'button';
+    close.setAttribute('aria-label', 'Fechar aviso'); close.textContent = '✕';
+    t.append(txt, close);
     t.classList.add('show');
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => t.classList.remove('show'), 2600);
+    toast._ms = Math.min(20000, Math.max(6000, 4000 + String(msg).length * 70));
+    toast.arm();
   }
+  toast.arm = () => { clearTimeout(toast._t); toast._t = setTimeout(() => $('#toast').classList.remove('show'), toast._ms); };
+  toast.hide = () => { clearTimeout(toast._t); $('#toast').classList.remove('show'); };
+  $('#toast').addEventListener('click', toast.hide);
+  ['mouseenter', 'touchstart'].forEach((ev) => $('#toast').addEventListener(ev, () => clearTimeout(toast._t), { passive: true }));
+  $('#toast').addEventListener('mouseleave', () => { if ($('#toast').classList.contains('show')) toast.arm(); });
 
   // ---------- Armazenamento ----------
   // Dentro do claude.ai os dados ficam na conta da pessoa (área privada,
@@ -1522,7 +1536,7 @@ html, body { background: var(--bg); color: var(--text); }
       addMsg('edie', reply);
       speak(reply);
     }
-    if (fromBar && currentView !== 'conversa') toast(reply.length > 140 ? reply.slice(0, 137) + '…' : reply);
+    if (fromBar && currentView !== 'conversa') toast(reply.length > 400 ? reply.slice(0, 397) + '…' : reply);
     if ($('#optHands').checked && SR && micOk && currentView === 'conversa') whenDoneSpeaking(() => setTimeout(() => listen(), 300));
   }
 

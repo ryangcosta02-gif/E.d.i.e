@@ -20,13 +20,24 @@
   const WEEKDAYS = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
   const norm = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
+  // Aviso no rodapé: fica mais tempo quanto maior o texto (6 a 20 s),
+  // não some enquanto o dedo/mouse está em cima e fecha no ✕ ou com um toque.
   function toast(msg) {
     const t = $('#toast');
-    t.textContent = msg;
+    t.innerHTML = '';
+    const txt = document.createElement('span'); txt.className = 'toast-text'; txt.textContent = msg;
+    const close = document.createElement('button'); close.className = 'toast-close'; close.type = 'button';
+    close.setAttribute('aria-label', 'Fechar aviso'); close.textContent = '✕';
+    t.append(txt, close);
     t.classList.add('show');
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => t.classList.remove('show'), 2600);
+    toast._ms = Math.min(20000, Math.max(6000, 4000 + String(msg).length * 70));
+    toast.arm();
   }
+  toast.arm = () => { clearTimeout(toast._t); toast._t = setTimeout(() => $('#toast').classList.remove('show'), toast._ms); };
+  toast.hide = () => { clearTimeout(toast._t); $('#toast').classList.remove('show'); };
+  $('#toast').addEventListener('click', toast.hide);
+  ['mouseenter', 'touchstart'].forEach((ev) => $('#toast').addEventListener(ev, () => clearTimeout(toast._t), { passive: true }));
+  $('#toast').addEventListener('mouseleave', () => { if ($('#toast').classList.contains('show')) toast.arm(); });
 
   // ---------- Armazenamento ----------
   const KEY = 'edie:v1';
@@ -897,7 +908,7 @@
       addMsg('edie', reply);
       speak(reply);
     }
-    if (fromBar && currentView !== 'conversa') toast(reply.length > 140 ? reply.slice(0, 137) + '…' : reply);
+    if (fromBar && currentView !== 'conversa') toast(reply.length > 400 ? reply.slice(0, 397) + '…' : reply);
     if ($('#optHands').checked && SR && currentView === 'conversa') whenDoneSpeaking(() => setTimeout(() => listen(), 300));
   }
 
