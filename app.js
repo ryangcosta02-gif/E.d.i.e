@@ -834,6 +834,13 @@
 
   // ---------- Conversa ----------
   const MAX_CHAT = 120;
+  const msgEl = new WeakMap(); // mensagem -> elemento na tela (sobrevive a re-renderizações)
+  function msgNode(m) {
+    const el = document.createElement('div');
+    el.className = 'msg ' + m.role; el.textContent = m.text;
+    msgEl.set(m, el);
+    return el;
+  }
   function renderChat() {
     const box = $('#chat');
     if (!state.chat.length) {
@@ -843,7 +850,7 @@
         <div class="chips">${['O que eu tenho hoje?', 'O que falta fazer?', 'Como está meu Instagram?', 'Reunião amanhã às 10h', 'Lembrar de pagar o aluguel sexta']
           .map((c) => `<button class="chip" data-say="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>`;
     } else {
-      box.innerHTML = state.chat.map((m) => `<div class="msg ${m.role}">${esc(m.text)}</div>`).join('');
+      box.replaceChildren(...state.chat.map(msgNode));
     }
     box.scrollTop = box.scrollHeight;
     $('#brainInfo').innerHTML = state.ai.key ? `Inteligência: <b>Claude ${state.ai.model === 'claude-haiku-5-5' ? 'Haiku' : 'Opus'}</b> · conversa completa ✓` : 'Inteligência: <b>básica</b> (só dia, tarefas, agenda e Instagram)';
@@ -856,11 +863,22 @@
     state.chat.push(m);
     if (state.chat.length > MAX_CHAT) state.chat.splice(0, state.chat.length - MAX_CHAT);
     save();
-    const el = document.createElement('div');
-    el.className = 'msg ' + role; el.textContent = text;
-    $('#chat').appendChild(el);
-    $('#chat').scrollTop = $('#chat').scrollHeight;
-    return { m, el, set(t) { m.text = t; el.textContent = t; $('#chat').scrollTop = $('#chat').scrollHeight; } };
+    if (currentView === 'conversa') { $('#chat').appendChild(msgNode(m)); $('#chat').scrollTop = $('#chat').scrollHeight; }
+    return {
+      m,
+      get el() { return msgEl.get(m) || document.createElement('div'); },
+      set(t) {
+        m.text = t;
+        const el = msgEl.get(m);
+        if (el && el.isConnected) el.textContent = t; else if (currentView === 'conversa') renderChat();
+        $('#chat').scrollTop = $('#chat').scrollHeight;
+      },
+      // leva a mensagem para o fim da conversa (ex.: a resposta depois de uma ação)
+      toEnd() {
+        const i = state.chat.indexOf(m);
+        if (i >= 0 && i !== state.chat.length - 1) { state.chat.splice(i, 1); state.chat.push(m); if (currentView === 'conversa') renderChat(); }
+      },
+    };
   }
   document.addEventListener('click', (e) => { const c = e.target.closest('[data-say]'); if (c) ask(c.dataset.say); });
 

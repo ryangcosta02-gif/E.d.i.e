@@ -53,6 +53,14 @@ Sem token, a tela mostra dados de exemplo. O histórico de seguidores é montado
 - Importar arquivo `.ics` (Google Agenda → Configurações → Importar e exportar → Exportar), ou
 - Sincronização direta de agenda **pública** com chave de API do Google Cloud (Calendar API ativada).
 
+## Versão dentro do claude.ai
+
+Há uma segunda versão da Edie que roda dentro do claude.ai e usa o **seu próprio plano do Claude** como cérebro (sem chave de API e sem custo extra; o uso conta nos limites do plano). Agenda, tarefas e conversa ficam salvas numa área privada da sua conta, iguais no celular e no computador.
+
+Diferenças: lá dentro o microfone não é liberado (você escreve e ela responde com voz) e o Instagram mostra dados de exemplo.
+
+Ela é gerada a partir do mesmo código do app: depois de mudar `index.html`, `styles.css` ou `app.js`, rode `python3 tools/build_claude_page.py` para atualizar `claude-ai/edie.html`.
+
 ## Privacidade
 
 Tudo fica salvo no navegador (localStorage). Os tokens nunca saem do seu aparelho, exceto nas chamadas diretas às APIs do Instagram/Google. O backup exportado não inclui tokens.
