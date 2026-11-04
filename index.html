@@ -88,6 +88,7 @@
               <label class="toggle">Conversa contínua (mãos livres)<input type="checkbox" id="optHands" /><span class="sw"></span></label>
             </div>
             <div class="brain" id="brainInfo"></div>
+            <button class="btn blue" id="openAi" style="width:100%">✦ Ativar conversa completa</button>
           </div>
           <div class="card chat-card">
             <div class="chat" id="chat"></div>
@@ -196,17 +197,14 @@
             <label>Como a Edie deve te chamar?<input id="cfgName" placeholder="Seu nome" /></label>
             <button class="btn primary">Salvar</button>
           </form>
-          <form class="card form" id="aiForm">
+          <div class="card form">
             <h2>Inteligência da Edie <span class="badge off" id="aiBadge">básica</span></h2>
-            <p class="muted small">Sem chave, a Edie entende comandos do dia a dia (agenda, tarefas, Instagram). Com uma chave da API do Claude ela conversa sobre qualquer assunto, entende o que você fala do seu jeito e age por você.
-              Crie a chave em <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener">platform.claude.com</a>.</p>
-            <label>Chave da API do Claude<input id="cfgAiKey" type="password" placeholder="sk-ant-…" /></label>
-            <p class="muted small">⚠ A chave fica salva só neste navegador. Não use este app em computador compartilhado com a chave salva.</p>
+            <p class="muted small">Sem chave, a Edie entende pedidos do dia a dia (agenda, tarefas, Instagram). Com a conversa completa ela usa o Claude: conversa sobre qualquer assunto, entende do seu jeito e age por você.</p>
             <div class="row">
-              <button class="btn primary">Salvar</button>
+              <button class="btn blue" type="button" id="openAi2">Configurar conversa completa</button>
               <button class="btn ghost" type="button" id="aiClear">Remover chave</button>
             </div>
-          </form>
+          </div>
           <form class="card form" id="voiceForm">
             <h2>Voz da Edie</h2>
             <label>Voz<select id="cfgVoice"></select></label>
@@ -274,6 +272,35 @@
         <span class="spacer"></span>
         <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
         <button value="save" class="btn primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ativar conversa completa -->
+  <dialog id="aiDialog">
+    <form method="dialog" class="form" id="aiForm">
+      <h2>✦ Conversa completa com a Edie</h2>
+      <p class="muted small">Com isso a Edie usa o Claude como cérebro: responde qualquer pergunta, conversa de verdade e cria tarefas e compromissos entendendo do seu jeito.</p>
+      <ol class="steps">
+        <li>Entre em <a href="https://platform.claude.com" target="_blank" rel="noopener"><b>platform.claude.com</b></a> e crie sua conta (pode ser com o Google).</li>
+        <li>Em <b>Billing</b>, adicione créditos. US$ 5 já dá pra bastante conversa.</li>
+        <li>Em <b>API Keys</b>, toque em <b>Create Key</b> e copie a chave (começa com <code>sk-ant-</code>).</li>
+        <li>Cole aqui embaixo e toque em <b>Ativar</b>.</li>
+      </ol>
+      <label>Chave da API<input id="cfgAiKey" type="password" placeholder="sk-ant-…" autocomplete="off" /></label>
+      <label>Cérebro
+        <select id="cfgAiModel">
+          <option value="claude-opus-5-5">Mais inteligente (Opus 5.5)</option>
+          <option value="claude-haiku-5-5">Econômico (Haiku 5.5)</option>
+        </select>
+      </label>
+      <p class="muted small">💰 Custo aproximado por pergunta: <b>Opus</b> uns 10 centavos de real; <b>Haiku</b> menos de 1 centavo. É uma estimativa e varia com o tamanho da conversa. Você pode trocar quando quiser.</p>
+      <p class="muted small">🔒 A chave fica salva só neste aparelho e é enviada apenas para a Anthropic (empresa do Claude).</p>
+      <p class="small" id="aiStatus"></p>
+      <div class="row end">
+        <span class="spacer"></span>
+        <button value="cancel" class="btn ghost" formnovalidate>Fechar</button>
+        <button type="submit" class="btn primary" id="aiSave">Ativar</button>
       </div>
     </form>
   </dialog>

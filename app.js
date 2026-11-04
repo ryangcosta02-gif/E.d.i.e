@@ -36,7 +36,7 @@
     tasks: [],
     ig: { token: '', cache: null, followerHistory: {} },
     gcal: { id: '', key: '' },
-    ai: { key: '' },
+    ai: { key: '', model: 'claude-opus-5-5' },
     voice: { name: '', rate: 1.05, pitch: 1, on: true, handsFree: false },
     chat: [],
   });
@@ -489,6 +489,7 @@
   const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : s;
   const tomorrow = () => ymd(addDays(new Date(), 1));
   const spokenDate = (s) => s === today() ? 'hoje' : s === tomorrow() ? 'amanhã' : fmtDate(s, { weekday: 'long', day: 'numeric', month: 'long' });
+  const fmtHora = (t) => { const [h, m] = t.split(':'); return `${+h}h${m !== '00' ? m : ''}`; };
   const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
 
   function createEvent({ title, date, start = '', end = '', place = '', notes = '' }) {
@@ -515,7 +516,7 @@
     const quando = spokenDate(date);
     let txt = evs.length
       ? `${cap(quando)} você tem ${plural(evs.length, 'compromisso', 'compromissos')}: ` +
-        evs.map((e) => (e.start ? `às ${e.start}, ` : 'o dia todo, ') + e.title).join('; ') + '.'
+        evs.map((e) => (e.start ? `às ${fmtHora(e.start)}, ` : 'o dia todo, ') + e.title).join('; ') + '.'
       : `${cap(quando)} sua agenda está livre.`;
     const tks = isToday ? tasksForToday() : state.tasks.filter((t) => !t.done && t.date === date);
     if (tks.length) txt += ` E ${tks.length === 1 ? 'falta uma tarefa' : `faltam ${tks.length} tarefas`}: ${tks.slice(0, 5).map((t) => t.title).join(', ')}${tks.length > 5 ? ' e outras' : ''}.`;
@@ -570,87 +571,172 @@
     return null;
   }
   function parseTime(text) {
-    const m = text.match(/(?:^|\s)(?:[àa]s?\s+)?(\d{1,2})(?:[:h](\d{2})?|\s*horas?)(?=\s|$|[,.])/i);
-    if (!m) return null;
-    const h = +m[1]; if (h > 23) return null;
-    return { time: `${pad(h)}:${m[2] || '00'}`, re: m[0] };
+    const t = text.toLowerCase();
+    let m, h, min = 0, re;
+    if ((m = t.match(/(?:^|\s)(?:[àa]o?s?\s+)?meio[\s-]dia(?:\s+e\s+meia)?/))) {
+      h = 12; min = /meia$/.test(m[0]) ? 30 : 0; re = m[0];
+    } else if ((m = t.match(/(?:^|\s)(?:[àa]s?\s+)?(\d{1,2})(?:[:h](\d{2})?|\s*horas?)(?:\s+e\s+meia)?(?:\s+da\s+(manh[ãa]|tarde|noite))?(?=\s|$|[,.?!])/))
+      || (m = t.match(/(?:^|\s)[àa]s?\s+(\d{1,2})(?:\s+e\s+meia)?(?:\s+da\s+(manh[ãa]|tarde|noite))?(?=\s|$|[,.?!])/))) {
+      h = +m[1];
+      const period = m[3] || (m.length === 3 ? m[2] : undefined);
+      min = m[2] && /^\d+$/.test(m[2]) ? +m[2] : /e meia/.test(m[0]) ? 30 : 0;
+      if (period && /tarde|noite/.test(period) && h < 12) h += 12;
+      re = m[0];
+    } else return null;
+    if (h > 23 || min > 59) return null;
+    return { time: `${pad(h)}:${pad(min)}`, re: new RegExp(re.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') };
   }
-  const clean = (s) => s.replace(/\s{2,}/g, ' ').replace(/^[\s,:.!?-]+|[\s,:.!?-]+$/g, '');
+  const clean = (s) => s.replace(/\s{2,}/g, ' ').replace(/^[\s,:;.!?-]+|[\s,:;.!?-]+$/g, '');
+  const stripAll = (s, patterns) => {
+    let prev;
+    do { prev = s; for (const p of patterns) s = s.replace(p, '').trim(); } while (s !== prev);
+    return s;
+  };
 
   const VIEWS = { agenda: 'agenda', calendario: 'agenda', instagram: 'instagram', insta: 'instagram', metricas: 'instagram', tarefas: 'tarefas', hoje: 'hoje', inicio: 'hoje', configuracoes: 'config', config: 'config', conversa: 'conversa' };
   const VIEW_NAMES = { hoje: 'a tela de hoje', agenda: 'sua agenda', tarefas: 'suas tarefas', instagram: 'seu Instagram', config: 'as configurações', conversa: 'a conversa' };
 
+  // Palavras de chamada e de educação que não mudam o pedido
+  const PREFIXES = [
+    /^(?:(?:ei|oi|ol[áa]|ô|e a[íi])\s+)?(?:edie|edi|eddie|ed[ií]|ed)\b\s*[,!.:]?\s*/i,
+    /^(?:por favor|pfv|pf)\b\s*,?\s*/i,
+    /^(?:(?:voc[êe]|vc|tu)\s+)?(?:pode|poderia|podia|consegue|conseguiria|d[áa] pra|d[áa] para)\s+(?:me\s+)?(?=\S)/i,
+    /^(?:eu\s+)?(?:quero|queria|gostaria)\s+(?:que\s+(?:voc[êe]|vc)\s+|de\s+)?/i,
+    /^(?:eu\s+)?preciso\s+que\s+(?:voc[êe]|vc)\s+/i,
+    /^me\s+ajuda\s+a\s+/i,
+    /^(?:ent[ãa]o|ent[ãa]o t[áa]|t[áa]|beleza|ok|certo)\s*,?\s+/i,
+  ];
+  const SUFFIXES = [/\s*,?\s*por favor$/i, /\s*,?\s*(?:pra|para) mim$/i, /(?:,\s*|\s+)(?:t[áa]|ok)\??$/i];
+
+  const DONE_RE = /^(?:concluir|conclui|conclua|marcar como feit[ao]|marca como feit[ao]|marque como feit[ao]|terminei|finalizei|acabei|j[áa] fiz|fiz|feito|completei|risca|riscar|tira da lista)\b\s*:?\s*/i;
+  const TASK_VERB = /^(?:(?:me\s+)?(?:adicion[ae]r?|acrescent[ae]r?|coloc[ae]r?|colocar|bot[ae]r?|p[õo]e|p[ôo]r|inclu[ia]r?|cri[ae]r?|anot[ae]r?|registr[ae]r?|salv[ae]r?|lembr[ae]r?|lembre-me|me lembra|me lembre)|n[ãa]o\s+(?:me\s+)?deix[ae]\s+(?:eu\s+)?esquecer|nova\s+tarefa|tarefa|lembrete|(?:eu\s+)?preciso|(?:eu\s+)?tenho\s+(?:que|de)|(?:eu\s+)?devo|(?:eu\s+)?vou\s+ter\s+que|to\s*do)\b/i;
+  const EVENT_VERB = /^(?:(?:me\s+)?(?:marc[ae]r?|marque|agend[ae]r?|agende))\b/i;
+  const EVENT_NOUN = /\b(?:reuni[ãa]o|compromisso|evento|consulta|encontro|call|dentista|m[ée]dic[oa]|aula|entrevista|anivers[áa]rio|almo[çc]o|jantar|festa|exame|corte de cabelo|academia|viagem|voo)\b/i;
+
+  const TASK_FILLERS = [
+    /^(?:me\s+)?(?:adicion[ae]r?|acrescent[ae]r?|coloc[ae]r?|bot[ae]r?|p[õo]e|p[ôo]r|inclu[ia]r?|cri[ae]r?|anot[ae]r?|registr[ae]r?|salv[ae]r?)\b/i,
+    /^(?:me\s+)?(?:lembr[ae]r?|lembre-me|lembra)\b(?:\s+(?:de|que))?/i,
+    /^n[ãa]o\s+(?:me\s+)?deix[ae]\s+(?:eu\s+)?esquecer\b(?:\s+(?:de|que))?/i,
+    /^(?:eu\s+)?(?:preciso|tenho\s+(?:que|de)|devo|vou\s+ter\s+que)\b/i,
+    /^(?:a[íi]|ae|l[áa])(?=\s|$|[,:])/i,
+    /^(?:uma?|nova|novo)\b/i,
+    /^(?:tarefa|lembrete|item|coisa)s?\b\s*:?/i,
+    /^(?:n[ao]s?|em|[àa])\s+(?:minha\s+|meu\s+)?(?:lista|agenda|tarefas)(?:\s+de\s+tarefas)?\b/i,
+    /^(?:pra|para)\s+mim\b/i,
+    /^(?:de|que|pra|para)\b\s*(?=\S)/i,
+    /^[:\-–]\s*/,
+  ];
+  const TASK_TAIL = [/\s+(?:n[ao]s?|[àa])\s+(?:minha\s+|meu\s+)?(?:lista|agenda)(?:\s+de\s+tarefas)?$/i, /\s+como\s+(?:uma\s+)?tarefa$/i];
+  const EVENT_FILLERS = [
+    /^(?:me\s+)?(?:marc[ae]r?|marque|agend[ae]r?|agende|adicion[ae]r?|coloc[ae]r?|bot[ae]r?|cri[ae]r?|anot[ae]r?|p[õo]e)\b/i,
+    /^(?:eu\s+)?(?:tenho|vou\s+ter)\b/i,
+    /^(?:a[íi]|ae)(?=\s|$|[,:])/i,
+    /^(?:uma?|nova|novo)\b/i,
+    /^(?:compromisso|evento)s?\b\s*:?/i,
+    /^(?:n[ao]s?|em|[àa])\s+(?:minha\s+|meu\s+)?agenda\b/i,
+    /^(?:pra|para)\s+mim\b/i,
+    /^(?:de|que|pra|para)\b\s*(?=\S)/i,
+    /^[:\-–]\s*/,
+  ];
+  const EVENT_TAIL = [/\s+(?:n[ao]s?|[àa])\s+(?:minha\s+|meu\s+)?agenda$/i, /\s+(?:no\s+)?dia$/i];
+
+  // Quando a Edie pergunta "qual tarefa?", a próxima fala completa o pedido
+  let pending = null;
+
+  function makeTask(text, d) {
+    let prio = 2;
+    if (/\b(urgente|importante|prioridade alta)\b/i.test(text)) { prio = 3; text = text.replace(/\b(urgente|importante|com prioridade alta|prioridade alta)\b/gi, ' '); }
+    if (d) text = text.replace(d.re, ' ');
+    const title = clean(stripAll(clean(text), TASK_TAIL));
+    if (!title) { pending = { kind: 'task', date: d?.date, prio }; return 'Claro! Qual é a tarefa?'; }
+    const date = d?.date || pending?.date || today();
+    addTask({ title: cap(title), date, prio: pending?.prio > prio ? pending.prio : prio });
+    pending = null;
+    return `Anotado: "${cap(title)}" para ${spokenDate(date)}${prio === 3 ? ', como urgente' : ''}.`;
+  }
+  function makeEvent(text, d, tm) {
+    if (d) text = text.replace(d.re, ' ');
+    if (tm) text = text.replace(tm.re, ' ');
+    const title = clean(stripAll(clean(stripAll(text, EVENT_FILLERS)), EVENT_TAIL));
+    const date = d?.date || pending?.date;
+    const start = tm?.time || pending?.start || '';
+    if (!title) { pending = { kind: 'event', date, start }; return 'Certo! Qual é o compromisso?'; }
+    if (!date) { pending = { kind: 'event-date', title, start }; return `Pra quando eu marco "${cap(title)}"?`; }
+    const ev = createEvent({ title, date, start });
+    pending = null;
+    return `Marquei "${ev.title}" para ${spokenDate(ev.date)}${ev.start ? ' às ' + fmtHora(ev.start) : ''}.`;
+  }
+
   function localBrain(raw) {
-    let text = raw.trim().replace(/^(edie|edi|ed)[,!.]?\s+/i, '');
+    let text = clean(stripAll(raw.trim(), PREFIXES));
+    text = clean(stripAll(text, SUFFIXES));
     const n = norm(text).replace(/[?!.]+$/, '');
-    if (!n) return 'Oi! Tô aqui.';
+    if (!n) return 'Oi! Tô aqui. Pode falar.';
+
+    // Completa um pedido que ficou pela metade
+    if (pending && !/^(cancela|deixa|esquece|nada|nao)\b/.test(n)) {
+      const d = parseDate(text), tm = parseTime(text);
+      if (pending.kind === 'task') return makeTask(text, d);
+      if (pending.kind === 'event') return makeEvent(text, d, tm);
+      if (pending.kind === 'event-date') {
+        if (!d) { pending = null; return 'Não entendi a data. Pode pedir de novo dizendo o dia, por exemplo "amanhã" ou "sexta"?'; }
+        const ev = createEvent({ title: pending.title, date: d.date, start: tm?.time || pending.start });
+        pending = null;
+        return `Marquei "${ev.title}" para ${spokenDate(ev.date)}${ev.start ? ' às ' + fmtHora(ev.start) : ''}.`;
+      }
+    }
+    if (pending) { pending = null; return 'Ok, deixa pra lá.'; }
 
     // Navegação
-    const nav = n.match(/^(?:abrir|abre|abra|ver|mostrar|mostra|mostre|ir para|ir pra|vai para|vai pra)\s+(?:a |o |as |os |meu |minha |minhas |meus )?(\w+)$/) || (VIEWS[n] && [n, n]);
+    const nav = n.match(/^(?:abrir|abre|abra|ver|mostrar|mostra|mostre|ir para|ir pra|vai para|vai pra|me mostra)\s+(?:a |o |as |os |meu |minha |minhas |meus )?(\w+)$/) || (VIEWS[n] && [n, n]);
     if (nav && VIEWS[nav[1]]) { go(VIEWS[nav[1]]); return `Abrindo ${VIEW_NAMES[VIEWS[nav[1]]]}.`; }
 
     // Conversa social
-    if (/^(obrigad[oa]|valeu|brigad[oa])/.test(n)) return 'Por nada! Tô sempre por aqui.';
-    if (/^(oi|ola|opa|e ai|eai|hey|bom dia|boa tarde|boa noite)\b/.test(n) && n.split(' ').length <= 4) return briefing();
+    if (/^(obrigad[oa]|valeu|brigad[oa]|vlw)/.test(n)) return 'Por nada! Tô sempre por aqui.';
+    if (/^(oi|ola|opa|e ai|eai|hey|bom dia|boa tarde|boa noite|tudo bem|tudo bom)\b/.test(n) && n.split(' ').length <= 5) return briefing();
     if (/^(quem e voce|o que voce (faz|sabe fazer)|ajuda|como (te usar|funciona))/.test(n))
-      return 'Eu sou a Edie, sua assistente. Posso te contar como está seu dia, criar tarefas e compromissos, marcar tarefas como feitas e te passar as métricas do Instagram. É só falar, por exemplo: "o que eu tenho amanhã?" ou "reunião sexta às 15h".';
+      return 'Eu sou a Edie, sua assistente. Posso te contar como está seu dia, anotar tarefas, marcar compromissos, marcar tarefas como feitas e te passar as métricas do Instagram. É só falar, por exemplo: "me lembra de pagar a luz amanhã" ou "marca reunião sexta às 3 da tarde".';
 
     // Concluir tarefa
-    const done = n.match(/^(?:concluir|conclui|concluí|marcar como feit[ao]|marca como feit[ao]|terminei|finalizei|ja fiz|fiz|feito)\s*:?\s+(?:a tarefa\s+)?(.+)$/);
-    if (done) {
-      const t = findTask(done[1]);
-      if (!t) return `Não achei nenhuma tarefa pendente parecida com "${done[1]}".`;
+    if (DONE_RE.test(text)) {
+      const q = clean(text.replace(DONE_RE, '').replace(/^(?:a\s+)?tarefa\s+(?:de\s+)?/i, ''));
+      const t = q && findTask(q);
+      if (!t) return q ? `Não achei nenhuma tarefa pendente parecida com "${q}".` : 'Qual tarefa você terminou?';
       completeTask(t);
       const rest = tasksForToday().length;
       return `Pronto, marquei "${t.title}" como feita. ${rest ? `Ainda ${rest === 1 ? 'falta uma' : `faltam ${rest}`} pra hoje.` : 'Você zerou as tarefas de hoje!'}`;
     }
 
-    const createVerb = /^(evento|compromisso|reuniao|marcar|marca|marque|agendar|agende|agenda|tarefa|lembrar|lembre|lembra|preciso|anota|anote|adicionar|adiciona|adicione|criar|cria|crie|fazer|todo)\b/.test(n);
-    const question = /\?$/.test(text) || /^(o que|oque|que|qual|quais|quando|quantos|quantas|como|tenho|me (fala|diz|conta)|fala|diz|resumo|e (hoje|amanha))/.test(n);
+    const d = parseDate(text);
+    const tm = parseTime(text);
+    const isQuestion = /\?$/.test(raw.trim()) && !TASK_VERB.test(text) && !EVENT_VERB.test(text)
+      || /^(o que|oque|que|qual|quais|quando|quanto|quantos|quantas|como|me (fala|diz|conta)|fala|diz|resumo|e (hoje|amanha)|tenho (alguma|algum|algo|compromisso|reuniao|tarefa)s?\b|eu tenho (alguma|algum|algo)|estou|to livre|ta livre)/.test(n);
+
+    // Criar compromisso: "marca/agenda ...", ou "tenho consulta sexta às 14h", ou pedido de criar com horário
+    if (!isQuestion) {
+      const startsTenho = /^(eu\s+)?(tenho|vou ter)\b/.test(n) && !/^(eu\s+)?tenho\s+(que|de)\b/.test(n);
+      if (EVENT_VERB.test(text) || (startsTenho && EVENT_NOUN.test(text) && (d || tm))
+        || (TASK_VERB.test(text) && (/\b(compromisso|evento|reuni[ãa]o)\b/i.test(text) || (tm && EVENT_NOUN.test(text))))
+        || (!TASK_VERB.test(text) && tm && (d || EVENT_NOUN.test(text)))) {
+        return makeEvent(text, d, tm);
+      }
+      if (TASK_VERB.test(text)) return makeTask(stripAll(text, TASK_FILLERS), d);
+    }
 
     // Perguntas
-    if (!createVerb || question) {
-      if (/(instagram|insta\b|seguidor|alcance|engajamento|curtida|metrica)/.test(n)) return igText();
-      if (/(tarefa|pendente|falta|fazer|afazer)/.test(n) && !/(agenda|compromisso|reuni)/.test(n)) return tasksText();
-      if (/(meu dia|resumo|agenda|compromisso|reuni|proximo|tenho|marcado|livre|ocupad|hoje|amanha|semana)/.test(n) || parseDate(text)) {
-        if (/proxim[oa] (compromisso|reuniao|evento)/.test(n)) {
-          const now = nowHM();
-          const next = state.events.filter((e) => e.date > today() || (e.date === today() && (e.start || '99') >= now))
-            .sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')))[0];
-          return next ? `Seu próximo compromisso é ${next.title}, ${spokenDate(next.date)}${next.start ? ' às ' + next.start : ''}.` : 'Você não tem nenhum compromisso pela frente.';
-        }
-        const d = parseDate(text);
-        return dayText(d?.date || today());
-      }
+    if (/(instagram|insta\b|seguidor|alcance|engajamento|curtida|metrica|post)/.test(n)) return igText();
+    if (/(tarefa|pendente|falta|fazer|afazer)/.test(n) && !/(agenda|compromisso|reuni)/.test(n)) return tasksText();
+    if (/proxim[oa] (compromisso|reuniao|evento)/.test(n)) {
+      const now = nowHM();
+      const next = state.events.filter((e) => e.date > today() || (e.date === today() && (e.start || '99') >= now))
+        .sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')))[0];
+      return next ? `Seu próximo compromisso é ${next.title}, ${spokenDate(next.date)}${next.start ? ' às ' + fmtHora(next.start) : ''}.` : 'Você não tem nenhum compromisso pela frente.';
     }
+    if (/(meu dia|resumo|agenda|compromisso|reuni|tenho|marcado|livre|ocupad|hoje|amanha|semana)/.test(n) || d) return dayText(d?.date || today());
 
-    // Criação
-    const isEvent = /^(evento|compromisso|reuniao|marcar|marca|marque|agendar|agende|agenda)\b/.test(n);
-    const isTask = /^(tarefa|lembrar|lembre|lembra|preciso|anota|anote|adicionar|adiciona|adicione|fazer|todo)\b/.test(n);
-    text = text.replace(/^(adicion[ae]r?|cri[ae]r?|anot[ae]r?)\s+(uma\s+|um\s+)?/i, '')
-      .replace(/^(evento|compromisso|marcar|marca|marque|agendar|agende|tarefa|lembre-me de|lembre-me|lembrar de|lembrar|lembra de|lembra|preciso|fazer|todo)\s*:?\s*/i, '')
-      .replace(/^(uma?\s+)?(tarefa|compromisso|evento)\s*(de|para|pra)?\s*/i, '')
-      .replace(/^(de|que|para|pra)\s+/i, '');
-
-    const d = parseDate(text); if (d) text = text.replace(d.re, ' ');
-    const tm = parseTime(text);
-
-    if (isEvent || (tm && !isTask)) {
-      if (tm) text = text.replace(tm.re, ' ');
-      const ev = createEvent({ title: clean(text) || 'Compromisso', date: d?.date || today(), start: tm?.time || '' });
-      return `Marquei "${ev.title}" para ${spokenDate(ev.date)}${ev.start ? ' às ' + ev.start : ''}.`;
-    }
-    if (isTask) {
-      let prio = 2;
-      if (/\b(urgente|importante)\b/i.test(text)) { prio = 3; text = text.replace(/\b(urgente|importante)\b/gi, ' '); }
-      const title = clean(text);
-      if (!title) return 'Qual tarefa você quer que eu anote?';
-      addTask({ title: cap(title), date: d?.date || today(), prio });
-      return `Anotado: "${cap(title)}" para ${spokenDate(d?.date || today())}${prio === 3 ? ', como urgente' : ''}.`;
-    }
     return state.ai.key
       ? 'Não consegui entender. Pode repetir de outro jeito?'
-      : 'Isso eu ainda não sei responder no modo básico. Posso falar do seu dia, das tarefas, da agenda e do Instagram, ou anotar coisas pra você. Pra conversar sobre qualquer assunto, coloque a chave do Claude em Configurações.';
+      : 'No modo básico eu só entendo pedidos sobre seu dia, tarefas, agenda e Instagram. Pra eu conversar sobre qualquer assunto, toque em "Ativar conversa completa".';
   }
 
   // ---------- Voz: fala (síntese) ----------
@@ -760,7 +846,8 @@
       box.innerHTML = state.chat.map((m) => `<div class="msg ${m.role}">${esc(m.text)}</div>`).join('');
     }
     box.scrollTop = box.scrollHeight;
-    $('#brainInfo').innerHTML = state.ai.key ? 'Inteligência: <b>Claude</b> (conversa livre)' : 'Inteligência: <b>básica</b> · <button class="link" data-goto="config">ativar conversa livre</button>';
+    $('#brainInfo').innerHTML = state.ai.key ? `Inteligência: <b>Claude ${state.ai.model === 'claude-haiku-5-5' ? 'Haiku' : 'Opus'}</b> · conversa completa ✓` : 'Inteligência: <b>básica</b> (só dia, tarefas, agenda e Instagram)';
+    $('#openAi').style.display = state.ai.key ? 'none' : '';
     if (!SR) $('#orbSub').textContent = 'Reconhecimento de voz indisponível neste navegador — escreva abaixo.';
   }
   function addMsg(role, text) {
@@ -927,11 +1014,12 @@ ${igLine}
           if (all) break;
         }
       };
+      const model = state.ai.model || MODEL;
       const stream = client().beta.messages.stream({
-        model: MODEL,
+        model,
         max_tokens: 16000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
+        // Fallback automático em caso de recusa (disponível no Opus; o Haiku não tem)
+        ...(model.startsWith('claude-opus') ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),
         output_config: { effort: 'low' },
         system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
         tools: TOOLS,
@@ -1026,20 +1114,46 @@ ${igLine}
   $('#cfgIgToken').value = state.ig.token;
   $('#cfgGcalId').value = state.gcal.id;
   $('#cfgGcalKey').value = state.gcal.key;
-  $('#cfgAiKey').value = state.ai.key;
   $('#cfgRate').value = state.voice.rate;
   $('#cfgPitch').value = state.voice.pitch;
   function aiBadge() {
-    $('#aiBadge').textContent = state.ai.key ? 'Claude ativo' : 'básica';
+    $('#aiBadge').textContent = state.ai.key ? 'conversa completa ✓' : 'básica';
     $('#aiBadge').classList.toggle('off', !state.ai.key);
   }
   aiBadge();
-  $('#aiForm').addEventListener('submit', (e) => {
+  function openAi() {
+    $('#cfgAiKey').value = state.ai.key;
+    $('#cfgAiModel').value = state.ai.model || MODEL;
+    $('#aiStatus').textContent = ''; $('#aiStatus').className = 'small';
+    $('#aiDialog').showModal();
+  }
+  $('#openAi').onclick = openAi;
+  $('#openAi2').onclick = openAi;
+  $('#aiForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    state.ai.key = $('#cfgAiKey').value.trim(); apiHistory = []; save(); aiBadge();
-    toast(state.ai.key ? 'Pronto! Agora a Edie conversa sobre qualquer assunto.' : 'Chave removida');
+    const key = $('#cfgAiKey').value.trim(), model = $('#cfgAiModel').value;
+    const st = $('#aiStatus');
+    if (!/^sk-ant-/.test(key)) { st.className = 'small err'; st.textContent = 'Essa chave não parece certa. Ela começa com sk-ant-'; return; }
+    if (!window.Anthropic) { st.className = 'small err'; st.textContent = 'Não consegui carregar o Claude. Recarregue a página e tente de novo.'; return; }
+    st.className = 'small'; st.textContent = 'Testando a chave…'; $('#aiSave').disabled = true;
+    try {
+      // Consulta gratuita só para validar a chave e o acesso ao modelo
+      await new window.Anthropic({ apiKey: key, dangerouslyAllowBrowser: true }).models.retrieve(model);
+      state.ai.key = key; state.ai.model = model; apiHistory = []; save(); aiBadge(); render();
+      st.className = 'small ok'; st.textContent = '✓ Tudo certo! A Edie agora conversa sobre qualquer assunto.';
+      const hi = `Pronto${state.name ? ', ' + state.name : ''}! Agora eu converso com você sobre qualquer assunto. Pode perguntar.`;
+      setTimeout(() => { $('#aiDialog').close(); if (currentView === 'conversa') { addMsg('edie', hi); speak(hi); } }, 900);
+    } catch (err) {
+      const A = window.Anthropic;
+      st.className = 'small err';
+      st.textContent = err instanceof A.AuthenticationError ? 'Chave inválida. Confira se copiou ela inteira.'
+        : err instanceof A.PermissionDeniedError ? 'Essa chave não tem acesso a esse modelo.'
+        : err instanceof A.NotFoundError ? 'Esse modelo não está disponível na sua conta. Tente o outro.'
+        : err instanceof A.APIConnectionError ? 'Sem conexão com a internet.'
+        : 'Não deu certo: ' + err.message;
+    } finally { $('#aiSave').disabled = false; }
   });
-  $('#aiClear').onclick = () => { state.ai.key = ''; $('#cfgAiKey').value = ''; apiHistory = []; save(); aiBadge(); toast('Chave removida'); };
+  $('#aiClear').onclick = () => { state.ai.key = ''; apiHistory = []; save(); aiBadge(); render(); toast('Chave removida. A Edie voltou para o modo básico.'); };
   const readVoiceForm = () => { state.voice.name = $('#cfgVoice').value; state.voice.rate = +$('#cfgRate').value; state.voice.pitch = +$('#cfgPitch').value; };
   $('#voiceForm').addEventListener('submit', (e) => { e.preventDefault(); readVoiceForm(); save(); toast('Voz salva'); });
   $('#voiceTest').onclick = () => { readVoiceForm(); stopSpeaking(); speak(`Oi${state.name ? ', ' + state.name : ''}! Eu sou a Edie. É assim que eu vou falar com você.`, true); };
